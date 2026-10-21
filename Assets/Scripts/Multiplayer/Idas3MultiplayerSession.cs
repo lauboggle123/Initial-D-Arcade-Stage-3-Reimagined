@@ -254,7 +254,7 @@ namespace Idas3.Multiplayer
         public Idas3CarSnapshot LocalSnapshot { get; private set; }
         public Idas3CarSnapshot RemoteSnapshot { get; private set; }
         public IReadOnlyList<Idas3Room> Rooms => transport?.Rooms ?? emptyRooms;
-        public bool EnnaAvailable { get; } = File.Exists(Path.Combine(Application.streamingAssetsPath,"ENNA/menu.idastex"));
+        public bool EnnaAvailable { get; } = File.Exists(Path.Combine(Idas3Platform.CoursePack("ENNA"),"menu.idastex"));
         public int AvailableCourseCount { get {int count=0;for(int i=0;i<Idas3CourseCatalog.Count;++i)if(Idas3CourseCatalog.Available(i))++count;return count;} }
         public IReadOnlyList<Idas3PlayerInfo> Players { get { UpdatePlayers(); return players; } }
         public static readonly string[] CarNames = {
@@ -452,9 +452,9 @@ namespace Idas3.Multiplayer
                 using(var file=File.OpenRead(typeof(Idas3MultiplayerSession).Assembly.Location)) complete+="-"+Convert.ToBase64String(hash.ComputeHash(file));
             }
             for(int course=11;course<16;++course)
-                complete+="-"+course+"-"+SpecialStageFingerprint(Path.Combine(Application.streamingAssetsPath,Idas3CourseCatalog.Packs[course-9]),Idas3CourseCatalog.Slugs[course-9],course>=12&&course<=14,course==15);
-            complete+="-16-"+GunsaiFingerprint(Path.Combine(Application.streamingAssetsPath,"GUNSAI"));
-            complete+="-17-"+OdawaraFingerprint(Path.Combine(Application.streamingAssetsPath,"ODAWARA"));
+                complete+="-"+course+"-"+SpecialStageFingerprint(Idas3Platform.CoursePack(Idas3CourseCatalog.Packs[course-9]),Idas3CourseCatalog.Slugs[course-9],course>=12&&course<=14,course==15);
+            complete+="-16-"+GunsaiFingerprint(Idas3Platform.CoursePack("GUNSAI"));
+            complete+="-17-"+OdawaraFingerprint(Idas3Platform.CoursePack("ODAWARA"));
             complete+=ExperimentalAuthority?"-authority1":"-pose1";
             // Never cache an incomplete identity when reading a course fails.
             return compatibility=complete;

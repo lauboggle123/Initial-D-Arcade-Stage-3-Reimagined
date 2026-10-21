@@ -63,7 +63,7 @@ public sealed class Idas3Updates : MonoBehaviour
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
     private static void Bootstrap(){
         Instance=null;StartupFinished=true;
-        if(Application.isEditor)return;
+        if(Application.isEditor||!Idas3Platform.UpdaterEnabled)return;
         bool diagnostic=false;
         foreach(string arg in Environment.GetCommandLineArgs())
             if((arg.StartsWith("-idas3-",StringComparison.Ordinal)&&arg!="-idas3-skip-update-once")||arg.StartsWith("-hakone-",StringComparison.Ordinal))diagnostic=true;

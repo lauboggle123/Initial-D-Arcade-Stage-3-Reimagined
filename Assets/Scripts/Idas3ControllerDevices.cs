@@ -222,6 +222,12 @@ public sealed class Idas3ControllerDevices : IDisposable
         state = active != null && active.choice.connected ? active.pad : default;
         return state.connected;
     }
+    // XInputControllerWindows only exists in Windows Input System builds.
+#if UNITY_EDITOR || UNITY_STANDALONE_WIN
+    private static bool IsWindowsXInput(InputDevice input) => input is XInputControllerWindows;
+#else
+    private static bool IsWindowsXInput(InputDevice input) => false;
+#endif
     private bool PollXInput(int slot, out Idas3ControlBindings.PadState pad)
     {
         pad = default; if (!xinputAvailable) return false;
@@ -245,7 +251,7 @@ public sealed class Idas3ControllerDevices : IDisposable
             if (!input.added || !input.enabled || (discoveryFilter != null && !discoveryFilter(input)) || !GamingDevice(input)) continue;
             // Windows Input System mirrors the same XInput ports. The native
             // API is authoritative for these four pads and preserves every bit.
-            if (rawConnected && (input is XInputControllerWindows || string.Equals(input.description.interfaceName, "XInput", StringComparison.OrdinalIgnoreCase))) continue;
+            if (rawConnected && (IsWindowsXInput(input) || string.Equals(input.description.interfaceName, "XInput", StringComparison.OrdinalIgnoreCase))) continue;
             if (!unityDevices.TryGetValue(input.deviceId, out var device))
             {
                 device = CreateDevice(input);

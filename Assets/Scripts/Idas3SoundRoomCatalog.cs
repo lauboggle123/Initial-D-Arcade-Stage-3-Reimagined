@@ -18,7 +18,7 @@ internal static class Idas3SoundRoomCatalog
     static readonly Dictionary<string,Track> byKey=new Dictionary<string,Track>();
     static readonly Dictionary<int,Track> packaged=new Dictionary<int,Track>();
     static bool loaded;
-    internal static string Root=>Path.Combine(Application.streamingAssetsPath,"SoundRoom");
+    internal static string Root=>Path.Combine(Idas3Platform.ContentRoot,"SoundRoom");
     internal static IEnumerable<Track> Packaged {get {Load();return packaged.Values;}}
     internal static Track Find(int id){Load();return packaged.TryGetValue(id,out var t)?t:null;}
     internal static Track Find(string key){Load();return !string.IsNullOrEmpty(key)&&byKey.TryGetValue(key,out var t)?t:null;}

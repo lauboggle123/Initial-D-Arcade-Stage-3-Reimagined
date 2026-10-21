@@ -36,7 +36,7 @@ public static class Idas3CourseCatalog
             default:return "DOWNHILL";
         }
     }
-    public static bool Available(int course)=>course>=0&&course<Count&&(course<9||File.Exists(Path.Combine(Application.streamingAssetsPath,Packs[course-9],"menu.idastex")));
+    public static bool Available(int course)=>course>=0&&course<Count&&(course<9||File.Exists(Path.Combine(Idas3Platform.CoursePack(Packs[course-9]),"menu.idastex")));
     public static int NextAvailable(int course,int direction){
         for(int i=0;i<Count;++i){course=(course+(direction<0?Count-1:1))%Count;if(Available(course))return course;}
         throw new InvalidOperationException("No courses installed");

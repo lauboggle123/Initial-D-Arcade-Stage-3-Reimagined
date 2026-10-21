@@ -43,7 +43,7 @@ public sealed class Idas3RomGate : MonoBehaviour
         var go = new GameObject("GDS-0033 startup check");
         DontDestroyOnLoad(go);
         Instance = go.AddComponent<Idas3RomGate>();
-        Instance.gameRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
+        Instance.gameRoot = Idas3Platform.GameRoot;
         Instance.background = go.AddComponent<Camera>();
         Instance.background.clearFlags = CameraClearFlags.SolidColor;
         Instance.background.backgroundColor = Color.black;
@@ -103,10 +103,17 @@ public sealed class Idas3RomGate : MonoBehaviour
         var key = Keyboard.current; var pad = Gamepad.current;
         if (key?.escapeKey.wasPressedThisFrame == true || pad?.buttonEast.wasPressedThisFrame == true) { Quit(); return; }
         if (Checking) return;
-        if (key?.leftArrowKey.wasPressedThisFrame == true || pad?.dpad.left.wasPressedThisFrame == true) selected = (selected + 2) % 3;
-        if (key?.rightArrowKey.wasPressedThisFrame == true || pad?.dpad.right.wasPressedThisFrame == true) selected = (selected + 1) % 3;
-        if (key?.enterKey.wasPressedThisFrame == true || key?.numpadEnterKey.wasPressedThisFrame == true || pad?.buttonSouth.wasPressedThisFrame == true) Activate(selected);
+        int count = Actions.Length;
+        if (key?.leftArrowKey.wasPressedThisFrame == true || pad?.dpad.left.wasPressedThisFrame == true) selected = (selected + count - 1) % count;
+        if (key?.rightArrowKey.wasPressedThisFrame == true || pad?.dpad.right.wasPressedThisFrame == true) selected = (selected + 1) % count;
+        if (key?.enterKey.wasPressedThisFrame == true || key?.numpadEnterKey.wasPressedThisFrame == true || pad?.buttonSouth.wasPressedThisFrame == true) Activate(Actions[selected]);
     }
+
+    // Android cannot open an app-private folder in another app; the ROM is
+    // placed there by the importer or adb, so only CHECK AGAIN and QUIT apply.
+    private static readonly int[] DesktopActions = { 0, 1, 2 }, AndroidActions = { 0, 2 };
+    private static readonly string[] ActionLabels = { "CHECK AGAIN", "OPEN ROM FOLDER", "QUIT" };
+    private static int[] Actions => Idas3Platform.IsAndroid ? AndroidActions : DesktopActions;
 
     private void Activate(int action)
     {
@@ -169,13 +176,13 @@ public sealed class Idas3RomGate : MonoBehaviour
         }
         else
         {
-            string[] labels = { "CHECK AGAIN", "OPEN ROM FOLDER", "QUIT" };
-            for (int i = 0; i < labels.Length; ++i)
+            var actions = Actions;
+            for (int i = 0; i < actions.Length; ++i)
             {
                 var rect = new Rect(198 + i * 295, 445, 280, 56);
                 if (Event.current.type == EventType.MouseMove && rect.Contains(Event.current.mousePosition)) selected = i;
                 Fill(rect, selected == i ? new Color(.89f, .08f, .16f) : new Color(.11f, .12f, .14f));
-                if (GUI.Button(rect,Idas3MenuLocalization.T(labels[i]),Idas3MenuLocalization.Style(buttonStyle))) { selected = i; Activate(i); }
+                if (GUI.Button(rect,Idas3MenuLocalization.T(ActionLabels[actions[i]]),Idas3MenuLocalization.Style(buttonStyle))) { selected = i; Activate(actions[i]); }
             }
         }
     }

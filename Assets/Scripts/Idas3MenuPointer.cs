@@ -5,8 +5,9 @@ using UnityEngine;
 internal sealed class Idas3MenuPointer
 {
     bool waitForRelease;
-    internal static bool Active => Input.GetMouseButton(0)||Input.GetMouseButtonUp(0)||
-        Input.GetMouseButton(1)||Input.GetMouseButtonUp(1)||Input.mouseScrollDelta.sqrMagnitude>0;
+    // Touches owned by the on-screen controls are not pointer input.
+    internal static bool Active => !Idas3TouchControls.OwnsPointer&&(Input.GetMouseButton(0)||Input.GetMouseButtonUp(0)||
+        Input.GetMouseButton(1)||Input.GetMouseButtonUp(1)||Input.mouseScrollDelta.sqrMagnitude>0);
     internal bool BlockNavigation(bool pointerActive,bool navigationHeld)
     {
         if(pointerActive)waitForRelease=true;

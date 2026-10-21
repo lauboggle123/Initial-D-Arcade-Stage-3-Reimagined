@@ -101,6 +101,8 @@ namespace Idas3.Multiplayer
         {
             // A terminal disconnect can only be dismissed by leaving the room.
             if(DisconnectedFinishVisible||ResultsVisible||session!=null&&session.StateName=="Returning")open=true;
+            // Online play is not available on this platform yet; never start EOS.
+            if(open&&!Idas3Platform.OnlineEnabled)return;
             blockThroughFrame=Time.frameCount;
             if(open==IsOpen)return;
             IsOpen=open;

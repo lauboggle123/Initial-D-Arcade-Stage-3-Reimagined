@@ -37,7 +37,7 @@ public sealed class Idas3DiscordPresence : MonoBehaviour
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     static void Bootstrap()
     {
-        if(Application.isEditor||FindAnyObjectByType<Idas3DiscordPresence>()!=null)return;
+        if(Application.isEditor||!Idas3Platform.DiscordEnabled||FindAnyObjectByType<Idas3DiscordPresence>()!=null)return;
         foreach(string arg in Environment.GetCommandLineArgs())
             if(arg.StartsWith("-idas3-",StringComparison.Ordinal)&&arg!="-idas3-replay-viewer"&&arg!="-idas3-replay-library"&&arg!="-idas3-skip-update-once")return;
         new GameObject("Discord Rich Presence").AddComponent<Idas3DiscordPresence>();

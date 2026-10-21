@@ -1,11 +1,23 @@
 # Reuse the complete verified native application's translation units.
 target_sources(idas3_native_assets PRIVATE src/unity_scene_capture.cpp src/unity_ui_capture.cpp)
 set_source_files_properties(src/unity_scene_capture.cpp src/unity_ui_capture.cpp PROPERTIES COMPILE_DEFINITIONS "NOMINMAX;WIN32_LEAN_AND_MEAN")
-get_target_property(IDAS3_APP_SOURCES InitialDRemake SOURCES)
-list(FILTER IDAS3_APP_SOURCES EXCLUDE REGEX "(^|/)main\\.cpp$")
-add_library(Idas3Unity SHARED src/unity_bridge.cpp src/unity_audio_output.cpp ${IDAS3_APP_SOURCES})
-add_dependencies(Idas3Unity pack_native_assets)
+set(IDAS3_PLUGIN_APP_SOURCES ${IDAS3_APP_SOURCES})
+list(FILTER IDAS3_PLUGIN_APP_SOURCES EXCLUDE REGEX "(^|/)main\\.cpp$")
+add_library(Idas3Unity SHARED src/unity_bridge.cpp src/unity_audio_output.cpp ${IDAS3_PLUGIN_APP_SOURCES})
 target_include_directories(Idas3Unity PRIVATE src)
+
+if(ANDROID)
+  # Scene API only: Unity owns rendering/audio output, so no D3D11, waveOut,
+  # GDI or XInput. IDAS3_PORTABLE_SCENE is defined project-wide (CMakeLists).
+  target_compile_definitions(Idas3Unity PRIVATE IDAS3_UNITY_PLUGIN)
+  target_link_libraries(Idas3Unity PRIVATE idas3_core idas3_native_assets idas3_original log)
+  target_link_options(Idas3Unity PRIVATE -Wl,--no-undefined -Wl,-z,max-page-size=16384)
+  set_target_properties(Idas3Unity PROPERTIES
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/../Assets/Plugins/Android/${ANDROID_ABI}")
+  return()
+endif()
+
+add_dependencies(Idas3Unity pack_native_assets)
 target_compile_definitions(Idas3Unity PRIVATE IDAS3_UNITY_PLUGIN UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
 target_compile_options(Idas3Unity PRIVATE /W4 /fp:strict)
 target_link_libraries(Idas3Unity PRIVATE idas3_core idas3_native_assets idas3_original d3d11 dxgi d3dcompiler gdi32 user32 shell32 xinput9_1_0 winmm)

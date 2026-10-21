@@ -137,7 +137,14 @@ internal static class Idas3Native
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern IntPtr Idas3UnityGetTexture();
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int Idas3UnityGetStatus(ref Status status);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] private static extern int Idas3UnityCopyError([Out] byte[] target, int capacity);
-    [DllImport("xinput9_1_0.dll", EntryPoint = "XInputGetState")] internal static extern uint ReadGamepad(uint user, out PadState state);
+    [DllImport("xinput9_1_0.dll", EntryPoint = "XInputGetState")] private static extern uint XInputGetState(uint user, out PadState state);
+    // Android has no XInput: report every slot as ERROR_DEVICE_NOT_CONNECTED so
+    // Bluetooth/USB pads come through the Unity Input System path instead.
+    internal static uint ReadGamepad(uint user, out PadState state)
+    {
+        if (Idas3Platform.IsAndroid) { state = default; return 1167; }
+        return XInputGetState(user, out state);
+    }
 
     internal static string Error()
     {

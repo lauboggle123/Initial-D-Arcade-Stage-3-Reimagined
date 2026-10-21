@@ -29,7 +29,7 @@ public sealed class Idas3CustomRaceMusic : MonoBehaviour
     [DllImport("Idas3Unity",CallingConvention=CallingConvention.Cdecl)] static extern int Idas3SceneSetCustomRaceMusicLoop([In] short[] samples,int count,int rate,int channels,int context,int loopStart,int loopEnd);
     internal void Initialize(string saveRoot,Idas3RaceMusicMenu view,Idas3RaceMusicCatalog original,string musicFolder=null){
         folder=Path.Combine(saveRoot,"custom-music");menu=view;catalog=original;
-        FolderPath=Path.GetFullPath(musicFolder??Path.Combine(Path.GetDirectoryName(Application.dataPath),FolderName));
+        FolderPath=Path.GetFullPath(musicFolder??Path.Combine(Idas3Platform.GameRoot,FolderName));
         try{
             Directory.CreateDirectory(folder);string path=Path.Combine(folder,"library.json");
             if(File.Exists(path)&&new FileInfo(path).Length<128*1024)library=JsonUtility.FromJson<Library>(File.ReadAllText(path))??new Library();
@@ -182,6 +182,9 @@ public sealed class Idas3CustomRaceMusic : MonoBehaviour
     }
     internal void AddMusic(){if(!Busy)StartCoroutine(PickAndImport());}
     IEnumerator PickAndImport(){
+        // No Windows file dialog on Android: tracks copied into the folder are
+        // imported by the folder scan.
+        if(Idas3Platform.IsAndroid){menu.SetNotice("Copy MP3, OGG or WAV files into "+FolderPath);yield break;}
         SetBusy(true);menu.SetNotice("Choose an MP3, OGG or WAV file…");
         string path=null;Exception error=null;int complete=0;
         string dialogTitle=Idas3MenuLocalization.T("Add custom race music");

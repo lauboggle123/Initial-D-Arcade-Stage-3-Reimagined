@@ -147,6 +147,73 @@ public static class Idas3Build
         BuildUnityScene();
     }
 
+    // Android: arm64 / Vulkan / IL2CPP. Game data is not packed into the APK;
+    // it lives in the app's external files directory (see Idas3Platform).
+    public const string AndroidPlugin = "Assets/Plugins/Android/arm64-v8a/libIdas3Unity.so";
+    public const string AndroidApplicationId = "com.initiald.arcadestage3";
+
+    [MenuItem("Initial D/Configure Android")]
+    public static void ConfigureAndroid()
+    {
+        Configure();
+        var android = UnityEditor.Build.NamedBuildTarget.Android;
+        PlayerSettings.SetApplicationIdentifier(android, AndroidApplicationId);
+        PlayerSettings.SetScriptingBackend(android, ScriptingImplementation.IL2CPP);
+        PlayerSettings.Android.targetArchitectures = AndroidArchitecture.ARM64;
+        PlayerSettings.Android.minSdkVersion = AndroidSdkVersions.AndroidApiLevel26;
+        PlayerSettings.Android.targetSdkVersion = AndroidSdkVersions.AndroidApiLevelAuto;
+        PlayerSettings.Android.forceInternetPermission = true;
+        PlayerSettings.Android.bundleVersionCode = AndroidVersionCode(PlayerSettings.bundleVersion);
+        PlayerSettings.SetUseDefaultGraphicsAPIs(BuildTarget.Android, false);
+        PlayerSettings.SetGraphicsAPIs(BuildTarget.Android, new[] { GraphicsDeviceType.Vulkan });
+        PlayerSettings.defaultInterfaceOrientation = UIOrientation.AutoRotation;
+        PlayerSettings.allowedAutorotateToLandscapeLeft = true;
+        PlayerSettings.allowedAutorotateToLandscapeRight = true;
+        PlayerSettings.allowedAutorotateToPortrait = false;
+        PlayerSettings.allowedAutorotateToPortraitUpsideDown = false;
+        AssetDatabase.ImportAsset(AndroidPlugin, ImportAssetOptions.ForceUpdate);
+        if (AssetImporter.GetAtPath(AndroidPlugin) is PluginImporter plugin)
+        {
+            plugin.SetCompatibleWithAnyPlatform(false);
+            plugin.SetCompatibleWithEditor(false);
+            plugin.SetCompatibleWithPlatform(BuildTarget.Android, true);
+            plugin.SetPlatformData(BuildTarget.Android, "CPU", "ARM64");
+            plugin.SaveAndReimport();
+        }
+        AssetDatabase.SaveAssets();
+        Debug.Log("Initial D: Android arm64 / Vulkan / IL2CPP configured.");
+    }
+
+    // 0.3.95-community-replays.51 -> 51; a release always raises this suffix.
+    internal static int AndroidVersionCode(string version)
+    {
+        var match = System.Text.RegularExpressions.Regex.Match(version ?? "", @"\.(\d+)$");
+        return match.Success ? int.Parse(match.Groups[1].Value) : 1;
+    }
+
+    [MenuItem("Initial D/Build Android APK")]
+    public static void BuildAndroid()
+    {
+        string project = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
+        if (!File.Exists(Path.Combine(project, AndroidPlugin)))
+            throw new FileNotFoundException("Run Build Android Native.cmd before building the APK.");
+        ConfigureAndroid();
+        if (EditorUserBuildSettings.activeBuildTarget != BuildTarget.Android &&
+            !EditorUserBuildSettings.SwitchActiveBuildTarget(BuildTargetGroup.Android, BuildTarget.Android))
+            throw new InvalidOperationException("Unity Android Build Support is required.");
+        const string output = "Builds/Android/InitialD-arm64.apk";
+        Directory.CreateDirectory(Path.Combine(project, "Builds/Android"));
+        bool development = Array.IndexOf(Environment.GetCommandLineArgs(), "-idas3-android-development") >= 0;
+        var report = BuildPipeline.BuildPlayer(new BuildPlayerOptions {
+            scenes = new[] { "Assets/Scenes/InitialDUnityScene.unity" },
+            locationPathName = Path.Combine(project, output), target = BuildTarget.Android,
+            options = development ? BuildOptions.Development | BuildOptions.ConnectWithProfiler : BuildOptions.None
+        });
+        if (report.summary.result != BuildResult.Succeeded)
+            throw new InvalidOperationException("Android build failed: " + report.summary.result);
+        Debug.Log("Initial D Android APK: " + output + " (game data is installed separately)");
+    }
+
     public static void RebuildWindowsPlayer(){
         const string output="Builds/Current/InitialDUnity.exe";
         if(!File.Exists(output))throw new FileNotFoundException("Build the complete Windows package first.",output);

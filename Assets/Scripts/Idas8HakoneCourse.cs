@@ -74,7 +74,7 @@ public sealed partial class Idas8HakoneCourse : MonoBehaviour
     }
     void LoadVariant(string selected){
         ClearScene();
-        LoadedCourse=CourseName(SceneFlags);root=Path.Combine(Application.streamingAssetsPath,LoadedCourse);
+        LoadedCourse=CourseName(SceneFlags);root=Idas3Platform.CoursePack(LoadedCourse);
         // IDZero 2.20 ships only dry Gunsai and Odawara scenery. Wet races use
         // that scenery under a Stage 8 rain sky, regraded as wet.json describes,
         // with the ordinary D3 rain and wet vehicle handling.

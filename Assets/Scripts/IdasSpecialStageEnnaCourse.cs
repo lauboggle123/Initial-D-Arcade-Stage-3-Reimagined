@@ -86,7 +86,7 @@ public sealed class IdasSpecialStageEnnaCourse : MonoBehaviour
     static bool IsPairedTexture(Manifest manifest,string name)=>IsPairedGateTexture(name)||
         (manifest.oneSidedTextures!=null&&Array.IndexOf(manifest.oneSidedTextures,name)>=0);
     void Load(int courseId){
-        LoadPack(courseId,Path.Combine(Application.streamingAssetsPath,Idas3CourseCatalog.Packs[courseId-9]));
+        LoadPack(courseId,Idas3Platform.CoursePack(Idas3CourseCatalog.Packs[courseId-9]));
     }
     void LoadPack(int courseId,string root){
         var manifest=JsonUtility.FromJson<Manifest>(File.ReadAllText(Path.Combine(root,"manifest.json")));

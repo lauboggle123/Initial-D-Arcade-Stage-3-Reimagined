@@ -145,6 +145,7 @@ public sealed class Idas3CommunityTimes : MonoBehaviour
                     if(enabled){var run=JsonUtility.FromJson<Run>(Encoding.UTF8.GetString(finishBuffer,0,length));if(Valid(run)){
                         run.id=Guid.NewGuid().ToString();run.ruleset=Ruleset;run.build=Application.version;run.epoch=snapshot?.epoch??FirstReplaySeason;
                         if(!SubmissionBuild(run.build))status="Only game build "+RequiredSubmissionBuild+" can share Time Attack runs.";
+                        else if(!Idas3Platform.LeaderboardSubmitEnabled)status="This platform shows community times; your runs stay personal.";
                         else QueueFinish(run);
                     }else status="This run could not be shared: checkpoint validation failed.";}
                     if(length>0)Idas3SharedAckFinish();
@@ -183,6 +184,8 @@ public sealed class Idas3CommunityTimes : MonoBehaviour
             // Reading current rankings is public: an upload/authentication
             // failure must not keep deleted remote records on screen.
             yield return RefreshSnapshot();
+            // Read-only platforms never register an installation or upload.
+            if(!Idas3Platform.LeaderboardSubmitEnabled)continue;
             if(!registered){yield return Request("/api/v1/register",JsonUtility.ToJson(new Identity{token=credential}));if(responseCode==200)registered=true;else{status=responseCode==403?"This installation is blocked from sharing.":"Community times offline; uploads will retry.";yield return null;continue;}}
             // Maximum one upload per second, preserving the server's rate limit.
             int sent=0;while(options.Current.communityTimes&&pending.runs.Count>0&&sent<5){
