@@ -1143,3 +1143,10 @@ add_test(NAME rival_difficulty COMMAND rival_difficulty_tests "${CMAKE_SOURCE_DI
 
 add_executable(weather_shelter_tests tests/weather_shelter_tests.cpp src/course_scene_catalog.cpp src/course.cpp)
 target_link_libraries(weather_shelter_tests PRIVATE idas3_native_assets)
+# Test environment: held countdowns never expire; released ones time out as the original.
+add_executable(test_environment_timers_tests tests/test_environment_timers_tests.cpp)
+target_link_libraries(test_environment_timers_tests PRIVATE idas3_original)
+if(MSVC)
+  target_compile_options(test_environment_timers_tests PRIVATE /W4 /fp:strict)
+endif()
+add_test(NAME test_environment_timers COMMAND test_environment_timers_tests)

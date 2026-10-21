@@ -1,4 +1,5 @@
 #include "original_race_rules.h"
+#include "original_test_environment.h"
 #include <bit>
 #include <cmath>
 #include <fstream>
@@ -176,7 +177,7 @@ OriginalRaceEvents OriginalRaceRules::tickFrame(OriginalPathCoordinate coordinat
     if(signed32(state_.remaining.value)<=0){
         state_.automaticBrake=true;
         if(vehicleStopped||signed32(state_.remaining.value)<=-30000){state_.timeUpFlag=true;if(!events.finished){state_.phase=OriginalRacePhase::TimeUp;events.timeUp=true;}}
-    }else {state_.automaticBrake=false;advanceOriginalRaceTimer(state_.remaining);}
+    }else {state_.automaticBrake=false;if(!originalCountdownsHeld())advanceOriginalRaceTimer(state_.remaining);}
     state_.previousCoordinate=coordinate;state_.previousPosition=position;state_.previousSampleTime=state_.elapsed.value;
     advanceOriginalRaceTimer(state_.elapsed);return events;
 }

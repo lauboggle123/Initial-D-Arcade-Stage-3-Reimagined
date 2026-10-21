@@ -1,4 +1,5 @@
 #include "original_legend_return.h"
+#include "original_test_environment.h"
 #include "original_legend_progress.h"
 #include <array>
 #include <bit>
@@ -21,7 +22,7 @@ bool cleared(const OriginalBattleProfile& p,unsigned course,int excludeFirstWin=
 }
 void event(OriginalLegendReturnFrame& f,OriginalLegendReturnCommand c,unsigned a=0,unsigned b=0){f.events.push_back({c,a,b});}
 //1341A0: the continue timer saturates at zero.
-void timer(OriginalBattleProfile& p){p.setu(1176,si(p.u(1176))>0?p.u(1176)-1:0);}
+void timer(OriginalBattleProfile& p){if(!originalCountdownsHeld())p.setu(1176,si(p.u(1176))>0?p.u(1176)-1:0);}
 OriginalLegendReturnFrame frame(const OriginalLegendReturnState& s){
     return {s.phase108,s.selected248,s.confirmFrame504,s.choiceFrame520,{},s.finished,
         originalLegendReturnDestination(s.continue92,s.action96)};

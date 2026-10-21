@@ -34,6 +34,7 @@ public sealed class Idas3SceneGame : MonoBehaviour
     private Idas3ControllerDevices controllerDevices = new Idas3ControllerDevices();
     private Idas3WheelFeedback wheelFeedback;
     private Idas3TouchControls touchControls;
+    private bool testEnvironment;
     internal Idas3ControllerDevices ControllerDevices => controllerDevices;
     internal Idas3ControlBindings ControlBindings => controlBindings;
     internal Idas3Native.FrameInput DiagnosticSubmittedInput { get; private set; }
@@ -175,9 +176,15 @@ public sealed class Idas3SceneGame : MonoBehaviour
             diagnosticMode = diagnostic || (importedTest && (Array.IndexOf(Environment.GetCommandLineArgs(),"-hakone-smoke")>=0||Array.IndexOf(Environment.GetCommandLineArgs(),"-hakone-menu-smoke")>=0));
             performanceDiagnostics = diagnostic && (Array.IndexOf(Environment.GetCommandLineArgs(), "-idas3-scene-perf-check") >= 0 || Array.IndexOf(Environment.GetCommandLineArgs(), "-idas3-multiplayer-profile") >= 0);
             MatchOutputResolution();
+            // Test environment (flag file): native countdowns are held, and the
+            // game runs on its own save folder, seeded once from the normal
+            // saves by the same verified import, so tests never touch progress.
+            testEnvironment = !diagnostic && File.Exists(Path.Combine(Application.persistentDataPath, "test-environment"));
+            string priorSaves = Path.Combine(Application.persistentDataPath, "userdata");
+            if (testEnvironment) { priorSaves = saves; saves = Path.Combine(Application.persistentDataPath, "userdata-unity-test"); }
             if (!diagnostic && !Directory.Exists(saves))
             {
-                string prior = Path.Combine(Application.persistentDataPath, "userdata");
+                string prior = priorSaves;
                 if (Directory.Exists(prior))
                 {
                     string staging = saves + ".import-" + Guid.NewGuid().ToString("N");
@@ -203,6 +210,10 @@ public sealed class Idas3SceneGame : MonoBehaviour
             if (Idas3Native.Idas3SceneConfigureLanguage(Idas3GameOptions.LoadArcadeTextLanguage(saves)) != 1)
                 throw new InvalidOperationException(Idas3Native.Error());
             Idas3Native.Idas3SceneSetLoadKeepAlive(loadKeepAliveCallback);loadKeepAliveRegistered=true;
+            // Native default is off; only call the export when the flag is present.
+            if (testEnvironment && Idas3Native.Idas3SceneSetTestEnvironment(1) != 1)
+                throw new InvalidOperationException(Idas3Native.Error());
+            if (testEnvironment) Debug.LogFormat(LogType.Log, LogOption.NoStacktrace, null, "IDAS3 test environment: countdowns held; saves in {0}", saves);
             if (Idas3SceneInitialize(assets, saves, renderWidth, renderHeight) != 1)
                 throw new InvalidOperationException(Idas3Native.Error());
             ready = true;
@@ -1104,8 +1115,22 @@ public sealed class Idas3SceneGame : MonoBehaviour
         try { StopNative(); }
         catch (Exception error) { Debug.LogError("Error while stopping the failed game: " + error); }
     }
+    private GUIStyle testEnvironmentStyle;
     private void OnGUI()
     {
+        if (failure == null && testEnvironment && Event.current.type == EventType.Repaint)
+        {
+            // Every screenshot shows which mode it came from. Sits between the
+            // FPS readout and the rear-view mirror.
+            if (testEnvironmentStyle == null)
+                testEnvironmentStyle = new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold };
+            testEnvironmentStyle.fontSize = Mathf.Max(10, Mathf.RoundToInt(Screen.height * .022f));
+            var label = new Rect(Screen.width * .5f - Screen.height * .16f, Screen.height * .03f, Screen.height * .32f, Screen.height * .034f);
+            var old = GUI.color;
+            GUI.color = new Color(0, 0, 0, .6f); GUI.DrawTexture(label, Texture2D.whiteTexture);
+            GUI.color = new Color(1f, .85f, .2f, 1f); GUI.Label(label, "TEST ENVIRONMENT", testEnvironmentStyle);
+            GUI.color = old;
+        }
         if (failure == null) return;
         float width = Mathf.Max(240, Mathf.Min(Screen.width - 32, 1100));
         float height = Mathf.Max(200, Mathf.Min(Screen.height - 32, 650));

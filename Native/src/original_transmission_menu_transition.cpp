@@ -1,4 +1,5 @@
 #include "original_transmission_menu_transition.h"
+#include "original_test_environment.h"
 #include <bit>
 #include <cmath>
 
@@ -30,7 +31,7 @@ OriginalTransmissionMenuTransitionEvents tickOriginalTransmissionMenuTransition(
         if(signedWord(s.fade460)<0){s.fade460=0;s.overlayEnabled464=0;++s.phase476;}
         break;
     case 1:
-        s.sharedCountdown1176=signedWord(s.sharedCountdown1176)>0?s.sharedCountdown1176-1:0;
+        if(!originalCountdownsHeld())s.sharedCountdown1176=signedWord(s.sharedCountdown1176)>0?s.sharedCountdown1176-1:0;
         if(!s.sharedCountdown1176)s.timedOut516=1;
         if(s.selected512!=input.selectedIndex){s.selected512=input.selectedIndex;out.selectionChanged=true;}
         if(input.confirmPressed||s.timedOut516){

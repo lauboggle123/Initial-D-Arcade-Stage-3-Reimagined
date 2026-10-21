@@ -8,6 +8,7 @@
 #include "unity_scene_capture.h"
 #include "unity_audio_output.h"
 #include "unity_ui_capture.h"
+#include "original_test_environment.h"
 #include "main.cpp"
 #include "../tests/mode_flow_app_tests.inl"
 #include "../tests/time_attack_completion_app_tests.inl"
@@ -817,6 +818,20 @@ int IDAS3_UNITY_CALL Idas3SceneShutdown(){
     try{if(r.sceneMode){destroyApp(r,true);publish(r,0);r.sceneMode=false;}return 1;}
     catch(const std::exception& e){unityError(e.what());return 0;}
     catch(...){unityError("Unknown Unity scene shutdown error");return 0;}
+}
+// Test environment flag (see original_test_environment.h). Process-wide and
+// callable before initialization; the host sets it once at startup.
+int IDAS3_UNITY_CALL Idas3SceneSetTestEnvironment(int enabled){
+    if(enabled!=0&&enabled!=1){unityError("Invalid test environment flag");return 0;}
+    idas3::original::setOriginalCountdownsHeld(enabled!=0);return 1;
+}
+// Persist what shutdown would, without stopping: mobile hosts can be killed
+// in the background without a quit callback.
+int IDAS3_UNITY_CALL Idas3SceneSaveNow(){
+    auto& r=unityRuntime();std::lock_guard lock(r.renderMutex);
+    try{if(r.sceneMode&&r.app&&!r.app->replayPlaybackActive)r.app->saveSettings();return 1;}
+    catch(const std::exception& e){unityError(e.what());return 0;}
+    catch(...){unityError("Unknown Unity scene save error");return 0;}
 }
 int IDAS3_UNITY_CALL Idas3SceneGetOptions(Idas3Options* options){
     auto& r=unityRuntime();std::lock_guard lock(r.renderMutex);

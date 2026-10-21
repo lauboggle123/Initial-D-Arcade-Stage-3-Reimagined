@@ -159,6 +159,11 @@ IDAS3_UNITY_EXPORT int IDAS3_UNITY_CALL Idas3SceneSaveMenuPointer(float x,float 
 // Exactly 35 values: 1..99 for a valid record, 0 when unavailable.
 IDAS3_UNITY_EXPORT int IDAS3_UNITY_CALL Idas3SceneSetSaveCarLevels(const uint32_t* levels,int count);
 IDAS3_UNITY_EXPORT int IDAS3_UNITY_CALL Idas3SceneShutdown(void);
+// Test environment: 1 holds cabinet countdowns (menus, visits, attract, race
+// time limit) so only input advances the game. Call before initialization.
+IDAS3_UNITY_EXPORT int IDAS3_UNITY_CALL Idas3SceneSetTestEnvironment(int enabled);
+// Writes settings and pending profiles as shutdown does, keeping the game running.
+IDAS3_UNITY_EXPORT int IDAS3_UNITY_CALL Idas3SceneSaveNow(void);
 // Register/clear on the Unity main thread. The callback must not call native
 // game APIs, dispatch gameplay events or throw across the unmanaged boundary.
 typedef void (IDAS3_UNITY_CALL *Idas3LoadKeepAliveCallback)(void);

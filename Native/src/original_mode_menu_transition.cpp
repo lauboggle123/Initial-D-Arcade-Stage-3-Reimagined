@@ -1,4 +1,5 @@
 #include "original_mode_menu_transition.h"
+#include "original_test_environment.h"
 #include <bit>
 #include <cmath>
 
@@ -42,7 +43,7 @@ OriginalModeMenuTransitionEvents tickOriginalModeMenuTransition(
         if(signedWord(s.fade448)<0){s.fade448=0;s.overlayEnabled456=0;++s.phase468;out.readyRequested=true;}
         break;
     case 1:
-        s.sharedCountdown1176=signedWord(s.sharedCountdown1176)>0?s.sharedCountdown1176-1:0;
+        if(!originalCountdownsHeld())s.sharedCountdown1176=signedWord(s.sharedCountdown1176)>0?s.sharedCountdown1176-1:0;
         if(!s.sharedCountdown1176)s.timedOut572=1;
         if(s.selected564!=input.selectedIndex){s.pointsWarning520=0;s.selected564=input.selectedIndex;out.selectionChanged=true;}
         if(accepted||s.timedOut572){

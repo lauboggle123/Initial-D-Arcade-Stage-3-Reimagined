@@ -81,6 +81,10 @@ internal static class Idas3Native
     [DllImport("Idas3Unity", CallingConvention=CallingConvention.Cdecl)]
     public static extern int Idas3SceneSetCustomMenuLanguage(int language);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int Idas3SceneSetSunGlare(int enabled);
+    // Writes settings and pending profiles as shutdown does, keeping the game running.
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int Idas3SceneSaveNow();
+    // Test environment: 1 holds cabinet countdowns so only input advances the game.
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int Idas3SceneSetTestEnvironment(int enabled);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int Idas3SceneSetCameraFov(int percent);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int Idas3SceneSetMapSize(int size);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int Idas3SceneSetLightsOffAdvantage(int hide);

@@ -1,4 +1,5 @@
 #include "original_tuning_child.h"
+#include "original_test_environment.h"
 #include <bit>
 #include <cmath>
 #include <stdexcept>
@@ -104,7 +105,7 @@ OriginalTuningChildFrame advanceOriginalTuningChild(OriginalTuningChild& s,Origi
         const auto& row=d.optional.at(s.optionalIndex).words;
         switch(s.phase){
         case 0:{
-            p.setu(1176,std::int32_t(p.u(1176))>0?p.u(1176)-1:0);
+            if(!originalCountdownsHeld())p.setu(1176,std::int32_t(p.u(1176))>0?p.u(1176)-1:0);
             s.choiceCursor=optionalCursor(s.choiceCursor,input.selectionAxis);
             if(s.choice!=s.choiceCursor){s.choice=s.choiceCursor;out.directCueIds.push_back(2);out.command=s.choice?6:5;}
             if(input.confirm){if(s.choice==0){s.balanceBeforeSpend=s.balance;transition(1);out.command=11;}else{transition(5);out.command=4;}}

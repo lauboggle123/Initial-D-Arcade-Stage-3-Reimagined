@@ -1,5 +1,6 @@
 #pragma once
 #include "original_battle_result_animation.h"
+#include "original_test_environment.h"
 #include <algorithm>
 #include <cstdint>
 
@@ -48,7 +49,7 @@ struct OnlineResultScreen {
         }else if(!decision){
             if(confirming){if(++confirmFrames>40)decision=selected?2:1;}
             else {
-                if(countdown)--countdown;
+                if(countdown&&!original::originalCountdownsHeld())--countdown;
                 const int previous=selected;
                 if(direction)selected=direction<0?0:1;
                 if(cancel||(peerLeft&&confirm)||!countdown)selected=1;

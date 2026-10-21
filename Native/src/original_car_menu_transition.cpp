@@ -1,4 +1,5 @@
 #include "original_car_menu_transition.h"
+#include "original_test_environment.h"
 #include <bit>
 #include <cmath>
 
@@ -29,7 +30,7 @@ OriginalCarMenuTransitionEvents tickOriginalCarMenuTransition(
         if(signedWord(s.fade464)<0){s.fade464=0;s.overlayEnabled472=0;++s.phase456;}
         break;
     case 1:
-        s.sharedCountdown1176=signedWord(s.sharedCountdown1176)>0?s.sharedCountdown1176-1:0;
+        if(!originalCountdownsHeld())s.sharedCountdown1176=signedWord(s.sharedCountdown1176)>0?s.sharedCountdown1176-1:0;
         if(!s.sharedCountdown1176)s.timedOut672=1;
         // Source first applies the caller-owned local-car/color selection.
         if(input.confirmPressed||s.timedOut672){

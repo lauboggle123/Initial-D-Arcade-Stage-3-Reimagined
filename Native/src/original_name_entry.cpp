@@ -1,4 +1,5 @@
 #include "original_name_entry.h"
+#include "original_test_environment.h"
 #include <algorithm>
 #include <bit>
 #include <cmath>
@@ -123,7 +124,7 @@ OriginalNameEntryEvents tickOriginalNameEntry(OriginalNameEntryState&s,const Ori
     switch(s.phase588){
     case 0:s.fadeEnabled584=1;--s.fade576;if(si(s.fade576)<0){s.fade576=0;++s.phase588;}break;
     case 1:
-        s.sharedCountdown1176=si(s.sharedCountdown1176)>0?s.sharedCountdown1176-1:0;if(!s.sharedCountdown1176)s.timedOut604=1;
+        if(!originalCountdownsHeld())s.sharedCountdown1176=si(s.sharedCountdown1176)>0?s.sharedCountdown1176-1:0;if(!s.sharedCountdown1176)s.timedOut604=1;
         s.fadeEnabled584=0;inputTick(s,i,t,e);if(e.nameCommitted&&s.selectedCardState96<=9)e.requestCardState10=true;break;
     case 2:s.fadeEnabled584=0;s.activeOverlay596=0;if(si(++s.hold592)>30){s.hold592=0;++s.phase588;}break;
     case 3:

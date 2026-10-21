@@ -1,5 +1,6 @@
 #include "imported_course_catalog.h"
 #include "original_time_attack_visit.h"
+#include "original_test_environment.h"
 #include "original_time_attack_background.h"
 #include "original_time_attack_stats.h"
 #include "original_ranking_data.h"
@@ -171,7 +172,7 @@ void OriginalTimeAttackVisit::advance(const Input& input){
         backgroundFrame_=advanceOriginalTimeAttackBackground(backgroundFrame_);
         // HLecture18D940..18D9F2; countdown1341A0 saturates. The source final
         // settle phase increments its own counter twice per owner update.
-        if(timerTicks_)--timerTicks_;
+        if(timerTicks_&&!originalCountdownsHeld())--timerTicks_;
         switch(phase_){
         case 0:if(--fade_<0){fade_=0;phase_=1;}break;
         case 1:
@@ -190,7 +191,7 @@ void OriginalTimeAttackVisit::advance(const Input& input){
         return;
     }
     if(stage_==Stage::Ranking){
-        if(timerTicks_)--timerTicks_;
+        if(timerTicks_&&!originalCountdownsHeld())--timerTicks_;
         //07F340 calls04BE00 then04BF00 before testing input. Source starts
         // fade phase1 at counter0, accepts confirm in phase2, and waits for
         // four settled black frames in phase4 after the30-tick exit fade.
@@ -204,7 +205,7 @@ void OriginalTimeAttackVisit::advance(const Input& input){
     }
     if(stage_==Stage::Continue){
         if(phase_==0){
-            if(timerTicks_)--timerTicks_;
+            if(timerTicks_&&!originalCountdownsHeld())--timerTicks_;
             const auto previous=selected_;
             if(input.previous)selected_=0;if(input.next)selected_=1;
             if(previous!=selected_)events_.push_back({Command::Cue,2,1});

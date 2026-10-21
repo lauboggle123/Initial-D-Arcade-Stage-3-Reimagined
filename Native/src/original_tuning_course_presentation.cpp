@@ -1,5 +1,6 @@
 #include "unity_ui_capture.h"
 #include "original_tuning_course_presentation.h"
+#include "original_test_environment.h"
 #include <algorithm>
 #include <bit>
 #include <cmath>
@@ -71,7 +72,12 @@ OriginalTuningCoursePresentation OriginalTuningCoursePresentation::load(const st
 void OriginalTuningCoursePresentation::reset(const original::OriginalTuningCourseMenu& state,const original::OriginalBattleProfile& profile){impl_->showroom.reset();impl_->ticks=0;impl_->drawFrame=0;impl_->kind=profile.byte(1192);impl_->count=state.count504;impl_->sliderX=.5f;impl_->sliderScale=1;}
 void OriginalTuningCoursePresentation::advance(const original::OriginalTuningCourseMenu& state,const original::OriginalBattleProfile& profile,float wheelPosition){
     impl_->kind=profile.byte(1192);impl_->count=state.count504;impl_->drawFrame=unsigned(impl_->ticks);
-    if(impl_->drawFrame>=impl_->pulse.size())throw std::out_of_range("Original tuning visit exceeds source timer bound");
+    // The source pulse table covers the original visit timer. A held test-environment
+    // visit can outlast it; only then does the pulse wrap. Otherwise the bound stands.
+    if(impl_->drawFrame>=impl_->pulse.size()){
+        if(!original::originalCountdownsHeld())throw std::out_of_range("Original tuning visit exceeds source timer bound");
+        impl_->drawFrame%=unsigned(impl_->pulse.size());
+    }
     const auto base=(state.count504-1)*5;const float first=impl_->sliderPositions.at(base)*f(0x3c23d70a),last=impl_->sliderPositions.at(base+state.count504-1)*f(0x3c23d70a);
     float range=last-first;range*=wheelPosition-.5f;
     float target=impl_->sliderPositions.at(base+state.selected496)*f(0x3c23d70a);target=std::fma(range,f(0x3dcccccd),target);

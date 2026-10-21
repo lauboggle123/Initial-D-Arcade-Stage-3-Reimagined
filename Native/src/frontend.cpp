@@ -1,5 +1,6 @@
 #include "unity_ui_capture.h"
 #include "frontend.h"
+#include "original_test_environment.h"
 #include "car_catalog.h"
 #include "original_choice_menu.h"
 #include "original_record_rules.h"
@@ -501,7 +502,10 @@ void Frontend::advanceAttractChild(){
     attractAudioEvents.push_back({attractChildId,oldFrame,false});
     bool completed=false;
     if(attractChildId>=3&&attractChildId<=5){attractCards.step();completed=attractCards.completed();}
-    else if(attractChildId==6||attractChildId==8){original::stepOriginalAttractTitle(attractTitle);titleFade=attractTitle.fadeArgb;completed=attractTitle.completed;}
+    else if(attractChildId==6||attractChildId==8){
+        // Test environment: the title waits in its original link-handshake phase,
+        // fully visible, until START instead of fading out into the demo.
+        original::stepOriginalAttractTitle(attractTitle,true,!original::originalCountdownsHeld());titleFade=attractTitle.fadeArgb;completed=attractTitle.completed;}
     else if(attractChildId==7){
         // 0E71DA enters state1 only after 157640 reports the recorded pose wrap.
         // Its completion threshold is evaluated on the next owner update.

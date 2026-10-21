@@ -1,4 +1,5 @@
 #include "original_tuning_course_menu.h"
+#include "original_test_environment.h"
 #include <bit>
 #include <stdexcept>
 namespace idas3::original {
@@ -20,7 +21,7 @@ OriginalTuningCourseMenuEvents tickOriginalTuningCourseMenu(OriginalTuningCourse
     case 0:
         --s.fade472;if(sw(s.fade472)<0){s.fade472=0;s.fadeEnabled480=0;++s.phase464;}break;
     case 1:{
-        p.setu(1176,sw(p.u(1176))>0?p.u(1176)-1u:0u);
+        if(!originalCountdownsHeld())p.setu(1176,sw(p.u(1176))>0?p.u(1176)-1u:0u);
         if(!p.u(1176))s.timedOut636=1;
         ++s.selectionFrames488;
         if(in.selectedIndex>=s.count504)throw std::invalid_argument("original tuning-course selector outside source table");
