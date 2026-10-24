@@ -153,8 +153,7 @@ Results (2026-10-24, test environment): new rows and defaults shown; drag moved 
 - Project skill `.claude/skills/android-device-test` (`IdasDevice.ps1`): install, push data/ROM, named overlay taps/holds/steering computed from screen size, screenshots, Unity logs. Records game-flow gotchas (Game Mode/Transmission use left/right; hidden menu countdown auto-picks Legend; Time Attack timer; single injectable finger). Phase 2 adds `Set-IdasTestEnvironment`.
 
 ## Housekeeping
-- Pushed: `origin/android-port` (`f9303aaa`, `84c7d10c`).
-- Committed (not pushed): Phase 4 `8650edae` and the Display & Graphics / frame-limit follow-up. Uncommitted: `CLAUDE.md`, `.claude/skills/release/`.
+- Pushed to `origin/android-port` (2026-10-24): Phases 1–2 (`f9303aaa`, `84c7d10c`), plan `3867b03f`, Phase 4 `8650edae`, display/frame-limit follow-up `da6c601f`, Phase 4b `3af0b0d2`, tilt fix `2a861fd3`. Uncommitted: `CLAUDE.md`, `.claude/skills/release/`.
 - `stash@{0}` (Phase 3 attempt) exists only in the original working copy; it is not on the remote.
 - ~1,800 modified texture `.meta` files from the Android target switch: never commit.
-- Phone state (2026-10-24): app reinstalled fresh; base data + all 9 course packs pushed; ROM imported via the picker; test environment flag off; "stay awake on USB" enabled (`adb shell svc power stayon false` to undo). `userdata-unity-test` holds test driver "A" in slot 01; `Custom Music` holds `idas3-test-tone.wav`.
+- Phone state (2026-10-24): app reinstalled fresh; base data + all 9 course packs pushed; ROM imported via the picker; test environment flag **on**; "stay awake on USB" enabled (`adb shell svc power stayon false` to undo). `userdata-unity-test` holds test driver "A" in slot 01 and TOUCH STEERING = TILT PHONE (35°): set it back to DRAG before scripted steering. `userdata-unity-scene` is a fresh real save (drag). `Custom Music` holds `idas3-test-tone.wav`.
