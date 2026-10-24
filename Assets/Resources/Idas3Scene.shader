@@ -30,6 +30,7 @@ Shader "IDAS3/Original Scene Material"
  }
  SubShader {
   Tags { "RenderType"="Opaque" }
+  LOD 200
   Pass {
    AlphaToMask [_AlphaToMask]
    Cull Off ZWrite [_ZWrite] ZTest [_ZTest]
@@ -41,6 +42,26 @@ Shader "IDAS3/Original Scene Material"
    #pragma fragment mainPS
    #pragma multi_compile_local _ IDAS_IMPORTED_COURSE
    #pragma multi_compile_instancing
+   #include "Idas3SceneCommon.cginc"
+   ENDHLSL
+  }
+ }
+ // GPUs without a geometry stage: the same work in the vertex stage, from
+ // per-triangle planes and final-vertex inputs baked into the mesh.
+ SubShader {
+  Tags { "RenderType"="Opaque" }
+  LOD 100
+  Pass {
+   AlphaToMask [_AlphaToMask]
+   Cull Off ZWrite [_ZWrite] ZTest [_ZTest]
+   Blend [_SrcBlend] [_DstBlend], [_SrcBlendAlpha] [_DstBlendAlpha]
+   HLSLPROGRAM
+   #pragma target 4.5
+   #pragma vertex mainVS
+   #pragma fragment mainPS
+   #pragma multi_compile_local _ IDAS_IMPORTED_COURSE
+   #pragma multi_compile_instancing
+   #define IDAS_VERTEX_FACES
    #include "Idas3SceneCommon.cginc"
    ENDHLSL
   }

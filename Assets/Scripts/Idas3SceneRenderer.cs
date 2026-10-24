@@ -34,6 +34,10 @@ public sealed class Idas3SceneRenderer : MonoBehaviour
     }
     [StructLayout(LayoutKind.Sequential, Pack = 8)]
     private struct SceneVertex { public Vector3 position, normal; public Vector4 color; public Vector2 uv; public Vector4 offset; }
+    // Vertex-faces meshes (GPUs without a geometry stage): each corner also
+    // carries its triangle's world plane and the final vertex's lighting inputs.
+    [StructLayout(LayoutKind.Sequential, Pack = 4)]
+    private struct WideVertex { public SceneVertex vertex; public Vector4 facePlane; public Vector3 finalPosition, finalNormal; public Vector4 finalColor, finalOffset; }
     [StructLayout(LayoutKind.Sequential, Pack = 8)]
     private struct SceneTexture { public uint width, height; public ulong pixelCount; public IntPtr argb; }
     [DllImport("Idas3Unity", CallingConvention = CallingConvention.Cdecl)]
@@ -71,7 +75,7 @@ public sealed class Idas3SceneRenderer : MonoBehaviour
     private readonly Vector4[] depthSidePlanes = new Vector4[4];
     private bool diagnosticDepthSubmissionBaseline;
     private bool diagnosticViewCullingBaseline;
-    private ComputeBuffer framesBuffer, lightsBuffer, fogBuffer;
+    private ComputeBuffer framesBuffer, lightsBuffer, fogBuffer, importedLampCells, importedLampLights;
     private readonly float[] frameWords = new float[184];
     private readonly int[] lightWords = new int[1248], fogWords = new int[136];
     [StructLayout(LayoutKind.Sequential)] private struct UInt4 { public uint x, y, z, w; }
@@ -110,6 +114,23 @@ public sealed class Idas3SceneRenderer : MonoBehaviour
         new VertexAttributeDescriptor(VertexAttribute.TexCoord0, VertexAttributeFormat.Float32, 2),
         new VertexAttributeDescriptor(VertexAttribute.TexCoord1, VertexAttributeFormat.Float32, 4)
     };
+    private static readonly VertexAttributeDescriptor[] wideLayout = {
+        new VertexAttributeDescriptor(VertexAttribute.Position, VertexAttributeFormat.Float32, 3),
+        new VertexAttributeDescriptor(VertexAttribute.Normal, VertexAttributeFormat.Float32, 3),
+        new VertexAttributeDescriptor(VertexAttribute.Color, VertexAttributeFormat.Float32, 4),
+        new VertexAttributeDescriptor(VertexAttribute.TexCoord0, VertexAttributeFormat.Float32, 2),
+        new VertexAttributeDescriptor(VertexAttribute.TexCoord1, VertexAttributeFormat.Float32, 4),
+        new VertexAttributeDescriptor(VertexAttribute.TexCoord3, VertexAttributeFormat.Float32, 4),
+        new VertexAttributeDescriptor(VertexAttribute.TexCoord4, VertexAttributeFormat.Float32, 3),
+        new VertexAttributeDescriptor(VertexAttribute.TexCoord5, VertexAttributeFormat.Float32, 3),
+        new VertexAttributeDescriptor(VertexAttribute.TexCoord6, VertexAttributeFormat.Float32, 4),
+        new VertexAttributeDescriptor(VertexAttribute.TexCoord7, VertexAttributeFormat.Float32, 4)
+    };
+    private bool vertexFaces;
+    public bool VertexFaces => vertexFaces;
+    public int WideUploadCount { get; private set; }
+    // Active ranges drawn from vertex-faces meshes this frame (0 on the geometry-stage path).
+    public int WideRangeCount { get; private set; }
     private readonly Dictionary<ulong, RangeObject> geometryLookup = new Dictionary<ulong, RangeObject>();
     private readonly List<RangeObject> selectedRanges = new List<RangeObject>();
     private int selectionStamp, freeRangeCursor;
@@ -131,7 +152,7 @@ public sealed class Idas3SceneRenderer : MonoBehaviour
         public SceneRange materialRange;
         public ulong materialTextureGeneration;
         public int materialQueue;
-        public bool materialConfigured, depthMaterialDirty, depthCandidate;
+        public bool materialConfigured, depthMaterialDirty, depthCandidate, wide;
         public uint parentScope = uint.MaxValue;
         public int layer = SceneLayer;
         public bool active = true;
@@ -162,15 +183,19 @@ public sealed class Idas3SceneRenderer : MonoBehaviour
         diagnosticViewCullingBaseline = Array.IndexOf(arguments, "-idas3-scene-view-culling-baseline") >= 0;
         if (diagnosticFlipDepth || diagnosticNoCull)
             Debug.Log("IDAS3 scene diagnostics: depthTestFlip=" + diagnosticFlipDepth + ", noCull=" + diagnosticNoCull);
-        sceneShader = Shader.Find("IDAS3/Original Scene Material");
+        if (Marshal.SizeOf<WideVertex>() != 136) throw new InvalidOperationException("Vertex-faces layout mismatch.");
+        vertexFaces = Idas3Platform.SceneVertexFaces;
+        sceneShader = Shader.Find("IDAS3/Original Scene Material"); Idas3Platform.SelectSceneShader(sceneShader);
         if (sceneShader == null || !sceneShader.isSupported) throw new InvalidOperationException("Original Unity scene shader is unavailable.");
-        directSceneShader = Resources.Load<Shader>("Idas3SceneDirect");
+        directSceneShader = Resources.Load<Shader>("Idas3SceneDirect"); Idas3Platform.SelectSceneShader(directSceneShader);
         if (directSceneShader == null || !directSceneShader.isSupported) throw new InvalidOperationException("Direct Unity scene shader is unavailable.");
+        Debug.Log("IDAS3 scene shaders: " + (vertexFaces ? "vertex faces (no geometry stage)" : "geometry stage") +
+            ", GPU geometry shaders " + (SystemInfo.supportsGeometryShaders ? "supported" : "unsupported"));
         headlightShader = Resources.Load<Shader>("Idas3Headlight");
         if (headlightShader == null || !headlightShader.isSupported) throw new InvalidOperationException("Projected headlight shader is unavailable.");
         geometryStageBaseline = Array.IndexOf(arguments, "-idas3-geometry-stage-baseline") >= 0;
         rangeReuseBaseline = Array.IndexOf(arguments, "-idas3-range-reuse-baseline") >= 0;
-        opaqueAlphaDepthShader = Shader.Find("Hidden/IDAS3/Opaque Alpha Depth");
+        opaqueAlphaDepthShader = Shader.Find("Hidden/IDAS3/Opaque Alpha Depth"); Idas3Platform.SelectSceneShader(opaqueAlphaDepthShader);
         if (opaqueAlphaDepthShader == null || !opaqueAlphaDepthShader.isSupported) throw new InvalidOperationException("Original opaque-alpha depth shader is unavailable.");
         // This component shares the host camera GameObject. Captured vertices
         // already contain their complete world transform, so their identity
@@ -195,6 +220,15 @@ public sealed class Idas3SceneRenderer : MonoBehaviour
         framesBuffer = new ComputeBuffer(46, 16, ComputeBufferType.Structured);
         lightsBuffer = new ComputeBuffer(312, 16, ComputeBufferType.Structured);
         fogBuffer = new ComputeBuffer(34, 16, ComputeBufferType.Structured);
+        // Imported-course materials declare the stationary-lamp buffers, but only
+        // IDZero night packs bind their own. Vulkan skips any draw with an unbound
+        // buffer ("missing bindings"), so supply empty globals; the shader reads
+        // them only when a material's _ImportedLampGrid has cells.
+        importedLampCells = new ComputeBuffer(1, 8, ComputeBufferType.Structured);
+        importedLampLights = new ComputeBuffer(1, 16, ComputeBufferType.Structured);
+        importedLampCells.SetData(new Vector2Int[1]); importedLampLights.SetData(new Vector4[1]);
+        Shader.SetGlobalBuffer("_ImportedLampCells", importedLampCells);
+        Shader.SetGlobalBuffer("_ImportedLampLights", importedLampLights);
         Camera.onPreRender += BeforeCamera;
         initialized = true;
     }
@@ -246,7 +280,7 @@ public sealed class Idas3SceneRenderer : MonoBehaviour
     {
         if (!initialized) throw new InvalidOperationException("Initialize the Unity scene renderer first.");
         Idas3.Multiplayer.Idas3OnlineTransportPump.KeepAliveDuringNativeLoad();
-        UploadedVertexCount = GeometryUploadCount = MaterialUpdateCount = 0;
+        UploadedVertexCount = GeometryUploadCount = MaterialUpdateCount = WideUploadCount = WideRangeCount = 0;
         MainViewExcludedRanges = MainViewExcludedVertices = MirrorViewExcludedRanges = MirrorViewExcludedVertices = 0;
         var frame = new SceneFrame { size = 256 };
         if (Idas3SceneGetFrame(ref frame) != 1 || frame.version != 1) throw new InvalidOperationException("Native scene frame is unavailable.");
@@ -303,6 +337,7 @@ public sealed class Idas3SceneRenderer : MonoBehaviour
                 var item = diagnosticPerfBaseline || rangeCacheOff ? GetRangeObject(ActiveMeshCount) : selectedRanges[i] ?? ClaimRangeObject();
                 if(!diagnosticPerfBaseline&&!rangeCacheOff)selectedRanges[i]=item;
                 ++ActiveMeshCount;
+                if (vertexFaces && WideVertices(range)) ++WideRangeCount;
                 int layer = diagnosticViewCullingBaseline ? SceneLayer : LayerForViewMask(range.viewMask);
                 if (item.layer != layer) { item.gameObject.layer = layer; item.layer = layer; }
                 if (!diagnosticViewCullingBaseline) {
@@ -331,10 +366,11 @@ public sealed class Idas3SceneRenderer : MonoBehaviour
                     item.gameObject.transform.SetParent(owners[range.lightScope], false);
                     item.parentScope = range.lightScope;
                 }
-                if (item.count != range.count)
+                bool wide = WideVertices(range), layoutChanged = item.wide != wide;
+                if (item.count != range.count || layoutChanged)
                 {
                     if (item.vertexCache.IsCreated) item.vertexCache.Dispose();
-                    item.mesh.Clear(); item.mesh.SetVertexBufferParams((int)range.count, layout);
+                    item.mesh.Clear(); item.mesh.SetVertexBufferParams((int)range.count, wide ? wideLayout : layout); item.wide = wide;
                     item.mesh.SetIndexBufferParams((int)range.count, IndexFormat.UInt32);
                     var indices = new NativeArray<uint>((int)range.count, Allocator.Temp, NativeArrayOptions.UninitializedMemory);
                     for (int j = 0; j < indices.Length; ++j) indices[j] = (uint)j;
@@ -357,7 +393,8 @@ public sealed class Idas3SceneRenderer : MonoBehaviour
                 bool geometryChanged = diagnosticPerfBaseline || !item.vertexCache.IsCreated || item.cachedBillboard != billboard || (!immutableMatch &&
                     UnsafeUtility.MemCmp(rangeVertices, NativeArrayUnsafeUtility.GetUnsafeReadOnlyPtr(item.vertexCache), vertexBytes) != 0);
                 if (geometryChanged) {
-                    item.mesh.SetVertexBufferData(source, (int)range.first, 0, (int)range.count, 0, UploadFlags);
+                    if (wide) UploadWide(item.mesh, rangeVertices, (int)range.count);
+                    else item.mesh.SetVertexBufferData(source, (int)range.first, 0, (int)range.count, 0, UploadFlags);
                     UploadedVertexCount += (int)range.count; ++GeometryUploadCount;
                     var first = source[(int)range.first];
                     Vector3 low = billboard ? first.normal : first.position, high = low;
@@ -589,6 +626,28 @@ public sealed class Idas3SceneRenderer : MonoBehaviour
         var result = new RangeObject { gameObject = obj, mesh = mesh, renderer = renderer, material = material };
         objects.Add(result); return result;
     }
+    // Ranges are plain triangle lists (indices 0..count-1). All three corners of
+    // a triangle receive bit-identical plane and final-vertex words, so the
+    // vertex stage reaches one culling decision and one flat color per triangle.
+    private unsafe void UploadWide(Mesh mesh, SceneVertex* vertices, int count)
+    {
+        var wide = new NativeArray<WideVertex>(count, Allocator.Temp, NativeArrayOptions.UninitializedMemory);
+        for (int t = 0; t < count; t += 3)
+        {
+            int last = Math.Min(t + 2, count - 1);
+            var a = vertices[t]; var final = vertices[last];
+            var face = last - t == 2 ? Vector3.Cross(vertices[t + 1].position - a.position, final.position - a.position) : Vector3.zero;
+            // As showroomGeometry's dot(face,eye-p0): offset in double so the
+            // stored constant is the nearest float to the exact plane term.
+            float w = (float)-((double)face.x * a.position.x + (double)face.y * a.position.y + (double)face.z * a.position.z);
+            var plane = new Vector4(face.x, face.y, face.z, w);
+            for (int k = t; k <= last; ++k)
+                wide[k] = new WideVertex { vertex = vertices[k], facePlane = plane, finalPosition = final.position,
+                    finalNormal = final.normal, finalColor = final.color, finalOffset = final.offset };
+        }
+        mesh.SetVertexBufferData(wide, 0, 0, count, 0, UploadFlags); wide.Dispose();
+        ++WideUploadCount;
+    }
     private static void PackWords(int[] source, UInt4[] target)
     {
         for (int i = 0; i < target.Length; ++i) target[i] = new UInt4 {
@@ -601,22 +660,28 @@ public sealed class Idas3SceneRenderer : MonoBehaviour
         a.first=b.first=0;a.sourceIndex=b.sourceIndex=0;
         return UnsafeUtility.MemCmp(&a, &b, 64) == 0;
     }
+    private int CullMode(SceneRange r)
+    {
+        bool actorCull = !diagnosticActorCullBaseline && ((r.flags & 32) != 0 || diagnosticCarCull);
+        return (r.flags & 1) != 0 && (IsCourseGeometry(r) || actorCull) && (r.flags & 4) == 0 && !diagnosticCullBaseline
+            ? (int)((r.isp >> 27) & 3) : 0;
+    }
+    // The geometry stage only rejects authored backfaces or selects the
+    // final vertex's flat colors. When neither operation applies its output
+    // is exactly the vertex shader's output, including both camera views.
+    private bool NeedsGeometryStage(SceneRange r) =>
+        geometryStageBaseline || CullMode(r) >= 2 || ((r.flags & 1) != 0 && (r.pcw & 2) == 0);
+    // lightobj chunk 7's original noLight, destination-color projector.
+    // Keep other emissive effects and course materials on their own path.
+    private static bool HeadlightProjector(SceneRange r) => (r.flags & 7) == 3 && r.pcw == 0x8a00071eu && (r.gmp & 512) != 0 &&
+        r.tsp >> 29 == 2 && ((r.tsp >> 26) & 7) == 1 && ((r.tsp >> 22) & 3) == 2;
+    // Without a geometry stage the scene shader's work comes from mesh data.
+    private bool WideVertices(SceneRange r) => vertexFaces && NeedsGeometryStage(r) && !HeadlightProjector(r);
     private void ConfigureMaterial(Material m, SceneRange r, int queue)
     {
         bool original = (r.flags & 1) != 0;
-        bool actorCull = !diagnosticActorCullBaseline && ((r.flags & 32) != 0 || diagnosticCarCull);
-        int cullMode = original && (IsCourseGeometry(r) || actorCull) && (r.flags & 4) == 0 && !diagnosticCullBaseline
-            ? (int)((r.isp >> 27) & 3) : 0;
-        // The geometry stage only rejects authored backfaces or selects the
-        // final vertex's flat colors. When neither operation applies its output
-        // is exactly the vertex shader's output, including both camera views.
-        Shader wanted = !geometryStageBaseline && cullMode < 2 && (!original || (r.pcw & 2) != 0)
-            ? directSceneShader : sceneShader;
-        // lightobj chunk 7's original noLight, destination-color projector.
-        // Keep other emissive effects and course materials on their own path.
-        if ((r.flags & 7) == 3 && r.pcw == 0x8a00071eu && (r.gmp & 512) != 0 &&
-            r.tsp >> 29 == 2 && ((r.tsp >> 26) & 7) == 1 && ((r.tsp >> 22) & 3) == 2)
-            wanted = headlightShader;
+        int cullMode = CullMode(r);
+        Shader wanted = HeadlightProjector(r) ? headlightShader : NeedsGeometryStage(r) ? sceneShader : directSceneShader;
         if (m.shader != wanted) m.shader = wanted;
         m.renderQueue = queue;
         // SetInt aliases SetFloat in Unity. Source material words require the
@@ -842,6 +907,7 @@ public sealed class Idas3SceneRenderer : MonoBehaviour
             mirrorAlphaDepth.Release(); mirrorAlphaDepth = null;
         }
         framesBuffer?.Release(); lightsBuffer?.Release(); fogBuffer?.Release();
+        importedLampCells?.Release(); importedLampLights?.Release();
         foreach (var item in objects) {
             if (item.vertexCache.IsCreated) item.vertexCache.Dispose();
             if (item.material != null) Destroy(item.material); if (item.depthMaterial != null) Destroy(item.depthMaterial); if (item.mesh != null) Destroy(item.mesh);

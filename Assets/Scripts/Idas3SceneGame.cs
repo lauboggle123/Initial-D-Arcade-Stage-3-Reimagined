@@ -86,6 +86,7 @@ public sealed class Idas3SceneGame : MonoBehaviour
     private int windowedWidth = 1280, windowedHeight = 720;
     internal string Failure => failure;
     internal bool Ready => ready;
+    internal Idas3SceneRenderer SceneRenderer => scene;
     internal bool PresenceAllowed => ready&&!stopping&&!diagnosticMode;
     internal bool ReplayViewerOpen => replayLibrary!=null&&replayLibrary.ViewerOpen;
     internal Idas3Native.Status Status { get; private set; }
@@ -245,6 +246,7 @@ public sealed class Idas3SceneGame : MonoBehaviour
             if(!diagnosticMode)gameObject.AddComponent<Idas3CommunityTimes>().Initialize(this,gameOptions,pauseMenu);
             pauseMenu.InitializeBindings(controlBindings);
             controllerDevices.Initialize(saves);
+            if(Idas3PerformanceLog.Enabled&&!diagnosticMode)gameObject.AddComponent<Idas3PerformanceLog>().Initialize(this);
             if(Idas3TouchControls.Supported&&!diagnosticMode){touchControls=gameObject.AddComponent<Idas3TouchControls>();touchControls.Configure(gameOptions.Current);gameOptions.Changed+=touchControls.Configure;}
             Application.lowMemory-=OnLowMemory;Application.lowMemory+=OnLowMemory;
             controllerDevices.ActiveDeviceChanged += ControllerDeviceChanged;

@@ -69,6 +69,15 @@ function Set-IdasTestEnvironment([switch]$Off) {
     else { Invoke-IdasAdb shell "touch $script:IdasFiles/test-environment" | Out-Null }
 }
 
+# Diagnostic flag files, read at launch: vertex-faces forces the scene shaders'
+# no-geometry-stage path (A/B on GPUs that have one); perf-log writes
+# files/perf/perf-*.csv and IDAS3PERF logcat rows.
+function Set-IdasFlag([Parameter(Mandatory)][ValidateSet('vertex-faces','perf-log')][string]$Name, [switch]$Off) {
+    Assert-IdasDevice
+    if ($Off) { Invoke-IdasAdb shell "rm -f $script:IdasFiles/$Name" | Out-Null }
+    else { Invoke-IdasAdb shell "touch $script:IdasFiles/$Name" | Out-Null }
+}
+
 # Screen size in the current (landscape) orientation.
 function Get-IdasScreen {
     $size = (Invoke-IdasAdb shell wm size | Select-String 'size: (\d+)x(\d+)' | Select-Object -Last 1).Matches[0]

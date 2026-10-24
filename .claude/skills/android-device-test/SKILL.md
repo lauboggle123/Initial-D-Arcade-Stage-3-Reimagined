@@ -44,6 +44,11 @@ The build switches Unity's active target to Android and rewrites ~1,800 texture 
 - A race only ends when the player reaches the goal: a Legend rival finishing first just latches the loss. To reach the result/Continue screens from a script, use Pause → RETIRE RACE → CONFIRM (counts as a time-out loss).
 - Saves go to `files/userdata-unity-test`, seeded once from `userdata-unity-scene`; real progress is never touched. Delete that folder to reseed.
 
+## Diagnostic flags (read at launch)
+
+- `Set-IdasFlag vertex-faces` forces the scene shaders' no-geometry-stage path (what Mali GPUs get); `Set-IdasFlag perf-log` writes `files/perf/perf-*.csv` and `IDAS3PERF` logcat rows (fps, CPU/GPU ms, `race-start`/`stage=` markers useful for waiting). Undo with `-Off`. A `decode-dxt` file (`adb shell touch .../files/decode-dxt`) forces CPU decoding of course DXT textures.
+- Imported courses: Hakone is 6 × Right from Akina on Course select and adds a time-of-day screen (4 × A to the race).
+
 ## Game flow facts that break scripts
 
 - Title → START → Save Select → A (open slot) → A (CONTINUE) → Transmission → Game Mode → Course → Route → Weather/Time → (Legend: Rival dialog, skip with START) → race intro.

@@ -124,6 +124,7 @@ public sealed partial class Idas8HakoneCourse : MonoBehaviour
         var t=DecodeTexture(File.ReadAllBytes(Path.Combine(root,Path.GetFileName(name))),name);
         textures.Add(name,t); return t;
     }
+    static bool loggedDxtDecode;
     internal static Texture2D DecodeTexture(byte[] bytes,string name) {
         if(bytes.Length<128 || System.Text.Encoding.ASCII.GetString(bytes,0,4)!="DDS ") throw new InvalidDataException(name);
         int height=BitConverter.ToInt32(bytes,12),width=BitConverter.ToInt32(bytes,16);
@@ -143,6 +144,18 @@ public sealed partial class Idas8HakoneCourse : MonoBehaviour
         // visibility in alpha (white = lit), interpreted by the material shader.
         // A8 needs black RGB, just like the source DXT5 shadow atlases.
         int mipCount=Math.Max(1,BitConverter.ToInt32(bytes,28));
+        bool dxt=!rgb565&&!alphaOnly&&!rgba;
+        if(dxt&&Idas3Platform.DecodeCompressedTextures){
+            // No BC support: expand the authored mips to RGBA32 instead of transcoding the pack.
+            // As LoadRawTextureData below: the declared chain is read from the
+            // start; some packs carry further levels past the header's mip count.
+            if(bytes.Length-128<Idas3DxtDecoder.CompressedSize(width,height,mipCount,fourcc=="DXT5"))throw new InvalidDataException("Truncated DDS mip chain: "+name);
+            if(!loggedDxtDecode){loggedDxtDecode=true;Debug.Log("IDAS3 course textures: decoding DXT to RGBA32 (no BC texture support)");}
+            var decoded=new Texture2D(width,height,TextureFormat.RGBA32,mipCount,false);
+            decoded.LoadRawTextureData(Idas3DxtDecoder.Decode(bytes,128,width,height,mipCount,fourcc=="DXT5"));
+            decoded.Apply(false,true);decoded.name=name;decoded.anisoLevel=8;decoded.filterMode=FilterMode.Trilinear;
+            return decoded;
+        }
         var t=new Texture2D(width,height,rgb565?TextureFormat.RGB565:alphaOnly||rgba?TextureFormat.RGBA32:fourcc=="DXT1"?TextureFormat.DXT1:TextureFormat.DXT5,mipCount,false);
         byte[] payload=new byte[(bytes.Length-128)*(alphaOnly?4:1)];
         if(alphaOnly){for(int i=128;i<bytes.Length;i++)payload[(i-128)*4+3]=bytes[i];}
@@ -163,9 +176,12 @@ public sealed partial class Idas8HakoneCourse : MonoBehaviour
         idZeroGeometryBaseline=Array.IndexOf(args,"-idas3-scene-smoke")>=0&&Array.IndexOf(args,"-idas3-idzero-geometry-baseline")>=0;
         bool direct=IdZero(LoadedCourse)&&!idZeroGeometryBaseline;
         bool packTrees=direct&&!(Array.IndexOf(args,"-idas3-scene-smoke")>=0&&Array.IndexOf(args,"-idas3-tree-packing-baseline")>=0);
+        // Without a geometry stage every course rejects paired faces from
+        // per-vertex planes; tree packing and LOD density stay IDZero-only.
+        bool facePlanes=direct||Idas3Platform.SceneVertexFaces;
         long treeVerticesBefore=0,treeVerticesAfter=0,treeIndexBytesBefore=0,treeIndexBytesAfter=0;
-        var shader=Resources.Load<Shader>("Idas3Scene");
-        var directShader=direct?Resources.Load<Shader>("Idas3SceneDirect"):shader;
+        var shader=Resources.Load<Shader>("Idas3Scene");Idas3Platform.SelectSceneShader(shader);
+        var directShader=facePlanes?Resources.Load<Shader>("Idas3SceneDirect"):shader;Idas3Platform.SelectSceneShader(directShader);
         if(shader==null||!shader.isSupported||directShader==null||!directShader.isSupported)throw new InvalidOperationException("Shared scene shader missing or unsupported");
         bool roadsideBaseline=Array.IndexOf(Environment.GetCommandLineArgs(),"-idas3-roadside-foliage-baseline")>=0&&
             Array.IndexOf(Environment.GetCommandLineArgs(),"-idas3-sadamine-boundary-check")>=0;
@@ -174,7 +190,7 @@ public sealed partial class Idas8HakoneCourse : MonoBehaviour
             Idas3.Multiplayer.Idas3OnlineTransportPump.KeepAliveDuringNativeLoad();
             var s=data.materials[i]; var m=new Material(directShader){name=s.name}; materials[i]=m;
             m.EnableKeyword("IDAS_IMPORTED_COURSE");
-            if(direct)m.EnableKeyword("IDAS_IMPORTED_VERTEX_FACES");
+            if(facePlanes)m.EnableKeyword("IDAS_IMPORTED_VERTEX_FACES");
             m.SetFloat("_ImportedSponsorSigns",(LoadedCourse=="TSUBAKI"?IsTsubakiSignAtlas(s):IsSponsorMaterial(LoadedCourse,s.name))?1:0);
             // Repeated cutout trees share meshes/materials. Instance their
             // world transforms; blended road shadows retain their draw order.
@@ -239,7 +255,7 @@ public sealed partial class Idas8HakoneCourse : MonoBehaviour
                     if(data.materials[mat].kind=="tree")PairedTreeTriangles+=paired;
                     else PairedRoadsideTriangles+=paired;
                 }
-                var planes=direct?SceneryFacePlanes(vertices,indices,treeFaces):null;
+                var planes=facePlanes?SceneryFacePlanes(vertices,indices,treeFaces):null;
                 bool tree=data.materials[mat].kind=="tree";
                 if(tree){treeVerticesBefore+=vertices.Length;treeIndexBytesBefore+=(long)indices.Length*4;}
                 if(packTrees&&tree)PackTreeVertices(ref vertices,ref normals,ref uv,ref uv2,ref colors,ref indices,ref treeFaces,ref planes);
@@ -250,9 +266,9 @@ public sealed partial class Idas8HakoneCourse : MonoBehaviour
                 // Unity may alias missing UV streams to texture coordinates.
                 // Explicit zeros keep unpaired triangles two-sided; otherwise
                 // arbitrary texture UVs can turn into per-corner culling flags.
-                if(direct)mesh.uv3=treeFaces??new Vector2[vertices.Length];
+                if(facePlanes)mesh.uv3=treeFaces??new Vector2[vertices.Length];
                 else if(treeFaces!=null)mesh.uv3=treeFaces;
-                if(direct)mesh.SetUVs(3,planes);
+                if(facePlanes)mesh.SetUVs(3,planes);
                 mesh.triangles=indices; mesh.RecalculateBounds(); mesh.UploadMeshData(true);
                 sourceMeshes[shape]=mesh; sourceMaterials[shape]=mat;
                 if(data.materials[mat].kind=="tree" || data.materials[mat].kind=="gallery") continue;

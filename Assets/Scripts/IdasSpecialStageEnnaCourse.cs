@@ -97,8 +97,15 @@ public sealed class IdasSpecialStageEnnaCourse : MonoBehaviour
         Require(manifest.wetLighting!=null&&manifest.wetLighting.fogEnd>manifest.wetLighting.fogStart,"Enna wet lighting missing");
         weatherLighting=new[]{lighting,manifest.wetLighting};
         Require(lighting.fogEnd>lighting.fogStart&&lighting.fogStart>=0,"Enna fog range");
-        var shader=Resources.Load<Shader>("Idas3Scene");Require(shader!=null&&shader.isSupported,"D3 scene shader unavailable");
-        var directShader=Resources.Load<Shader>("Idas3SceneDirect");Require(directShader!=null&&directShader.isSupported,"Direct D3 scene shader unavailable");
+        var shader=Resources.Load<Shader>("Idas3Scene");Idas3Platform.SelectSceneShader(shader);Require(shader!=null&&shader.isSupported,"D3 scene shader unavailable");
+        var directShader=Resources.Load<Shader>("Idas3SceneDirect");Idas3Platform.SelectSceneShader(directShader);Require(directShader!=null&&directShader.isSupported,"Direct D3 scene shader unavailable");
+        // Without a geometry stage, paired faces carry per-triangle planes and
+        // use the direct shader's vertex-stage rejection instead.
+        bool facePlanes=Idas3Platform.SceneVertexFaces;
+        void PairedMaterial(Material m){
+            if(!facePlanes){m.shader=shader;return;}
+            m.shader=directShader;m.EnableKeyword("IDAS_IMPORTED_VERTEX_FACES");
+        }
         bool gateBaseline=Array.IndexOf(Environment.GetCommandLineArgs(),"-idas3-enna-gates-baseline")>=0;
         bool geometryBaseline=Array.IndexOf(Environment.GetCommandLineArgs(),"-idas3-geometry-stage-baseline")>=0;
         foreach(var name in manifest.textureNames){
@@ -110,7 +117,8 @@ public sealed class IdasSpecialStageEnnaCourse : MonoBehaviour
             // Authored paired guardrail and gate faces need geometry-stage
             // rejection. All other imported vertices pass through unchanged.
             bool paired=IsPairedTexture(manifest,name)&&!(gateBaseline&&IsPairedGateTexture(name));
-            var material=new Material(geometryBaseline||paired?shader:directShader){name="Enna "+name,mainTexture=texture,renderQueue=900,enableInstancing=true};materials.Add(material);
+            var material=new Material(geometryBaseline?shader:directShader){name="Enna "+name,mainTexture=texture,renderQueue=900,enableInstancing=true};materials.Add(material);
+            if(paired)PairedMaterial(material);
             material.EnableKeyword("IDAS_IMPORTED_COURSE");material.SetFloat("_ImportedNight",1);material.SetFloat("_ImportedCutoff",.3f);
             material.SetFloat("_ImportedPs2Lighting",1);
             material.SetFloat("_TrackSurface",1);
@@ -143,6 +151,13 @@ public sealed class IdasSpecialStageEnnaCourse : MonoBehaviour
                         colors[v]=new Color32((byte)Math.Min(255,red*2),(byte)Math.Min(255,green*2),(byte)Math.Min(255,blue*2),(byte)Math.Min(255,alpha*2));
                     }
                     for(int i=0;i<ni;++i){indices[i]=r.ReadInt32();Require(indices[i]>=0&&indices[i]<nv,"Enna index");}
+                    bool pairedPart=(flags&2)!=0||IsPairedTexture(manifest,manifest.textureNames[material])&&!(gateBaseline&&IsPairedGateTexture(manifest.textureNames[material]));
+                    if(facePlanes&&pairedPart){
+                        // One plane per triangle needs unshared corners (as Hakone's paired faces).
+                        var flatVertices=new Vector3[ni];var flatUv=new Vector2[ni];var flatColors=new Color32[ni];
+                        for(int i=0;i<ni;++i){flatVertices[i]=vertices[indices[i]];flatUv[i]=uv[indices[i]];flatColors[i]=colors[indices[i]];indices[i]=i;}
+                        vertices=flatVertices;uv=flatUv;colors=flatColors;nv=ni;
+                    }
                     var mesh=new Mesh{name=name+"_"+p,indexFormat=IndexFormat.UInt32};meshes.Add(mesh);
                     mesh.vertices=vertices;mesh.uv=uv;mesh.colors32=colors;
                     // The shared D3 shader reads these channels even for PS2
@@ -153,15 +168,16 @@ public sealed class IdasSpecialStageEnnaCourse : MonoBehaviour
                     // Paired guardrail and gate skins share the same plane.
                     // Reuse the D3 imported-face rejection in world space so
                     // both main and mirror cameras draw only the facing side.
-                    if((flags&2)!=0||IsPairedTexture(manifest,manifest.textureNames[material])&&!(gateBaseline&&IsPairedGateTexture(manifest.textureNames[material])))
+                    if(pairedPart)
                         for(int v=0;v<nv;++v)faceFlags[v]=Vector2.right;
                     mesh.uv3=faceFlags;
+                    if(facePlanes&&pairedPart)mesh.SetUVs(3,Idas8HakoneCourse.SceneryFacePlanes(vertices,indices,faceFlags));
                     mesh.triangles=indices;mesh.RecalculateBounds();mesh.UploadMeshData(true);
                     if(flags!=0){
                         int key=material*4+flags;
                         if(!partMaterials.TryGetValue(key,out int variant)){
                             var copy=new Material(materials[material]);
-                            if((flags&2)!=0)copy.shader=shader;
+                            if((flags&2)!=0)PairedMaterial(copy);
                             if((flags&1)!=0){copy.SetFloat("_ZWrite",0);copy.renderQueue=950;}
                             variant=materials.Count;materials.Add(copy);partMaterials.Add(key,variant);
                         }

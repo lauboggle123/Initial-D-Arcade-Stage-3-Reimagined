@@ -157,16 +157,78 @@ float sourceFogCoefficient(float reciprocalDepth){
  uint pair=_IdasFogWords[2+(index>>2)][index&3];
  return lerp(float(pair>>8),float(pair&255),fraction)/255.0;
 }
+// Unity's Vulkan compiler rejects SV_CullDistance (GL_ARB_cull_distance), so
+// outside D3D11 hidden paired faces collapse in the vertex stage instead.
+#if defined(IDAS_IMPORTED_VERTEX_FACES) && (defined(IDAS_VERTEX_FACES) || !defined(SHADER_API_D3D11))
+#define IDAS_COLLAPSE_HIDDEN_FACES
+#endif
+#if defined(IDAS_VERTEX_FACES) || defined(IDAS_COLLAPSE_HIDDEN_FACES)
+// A hidden triangle's three corners all take this one point, so it has no
+// area and is never rasterized. Every corner reaches the same decision because
+// it depends only on the shared plane and uniforms, never on its own position.
+#define IDAS_HIDDEN_TRIANGLE float4(2,2,2,1)
+#endif
 struct V{float3 p:POSITION;float3 n:NORMAL;float4 c:COLOR0;float2 uv:TEXCOORD0;float4 offsetColor:TEXCOORD1;float2 treeFace:TEXCOORD2;
 #if defined(IDAS_IMPORTED_COURSE) && defined(IDAS_IMPORTED_VERTEX_FACES)
  float4 facePlane:TEXCOORD3;
+#elif !defined(IDAS_IMPORTED_COURSE) && defined(IDAS_VERTEX_FACES)
+ // Geometry-stage replacement (Idas3SceneRenderer.WideVertex): every corner of
+ // a triangle carries the same world plane and the same final-vertex inputs.
+ float4 facePlane:TEXCOORD3;float3 finalPosition:TEXCOORD4;float3 finalNormal:TEXCOORD5;
+ float4 finalColor:TEXCOORD6;float4 finalOffset:TEXCOORD7;
 #endif
  UNITY_VERTEX_INPUT_INSTANCE_ID};
 struct P{float4 p:SV_POSITION;float3 world:TEXCOORD0;float3 n:NORMAL;float4 c:COLOR0;float2 uv:TEXCOORD1;float4 offsetColor:COLOR1;noperspective float reciprocalDepth:TEXCOORD2;float treeFace:TEXCOORD3;float sponsorAxis:TEXCOORD4;
-#if defined(IDAS_IMPORTED_COURSE) && defined(IDAS_IMPORTED_VERTEX_FACES)
+#if defined(IDAS_IMPORTED_COURSE) && defined(IDAS_IMPORTED_VERTEX_FACES) && !defined(IDAS_COLLAPSE_HIDDEN_FACES)
  float faceVisibility:SV_CullDistance0;
 #endif
 };
+#if !defined(IDAS_IMPORTED_COURSE)
+// Source-space position and normal of one vertex, including camera-facing cards.
+void idasPlaceVertex(float3 p,float3 rawNormal,out float3 world,out float3 n){
+ world=p;n=rawNormal;
+ if(billboard!=0){float3 facing=cross(cameraRight.xyz,cameraUp.xyz);
+  float localZ=p.z;float3 localNormal=float3(0,0,1);
+  if((gmp&512)==0){
+   // Lit source cards are planar. LocalZ carries their exact source normal
+   // bytes, not a displaced coordinate; retain signed byte/127 semantics.
+   uint packed=(uint)(p.z*16777216.0);
+   int3 bytes=int3((int)(packed<<24),(int)(packed<<16),(int)(packed<<8))>>24;
+   localNormal=float3(bytes)/127.0;localZ=0;
+  }
+  world=rawNormal+cameraRight.xyz*p.x+cameraUp.xyz*p.y+facing*localZ;
+  n=cameraRight.xyz*localNormal.x+cameraUp.xyz*localNormal.y+facing*localNormal.z;}
+}
+// Per-vertex source lighting. c/offset enter as the authored vertex colors.
+void idasVertexLight(float3 p,float3 rawNormal,float3 world,float3 n,inout float4 c,inout float4 offset){
+ float4 rawColor=c,rawOffset=offset;
+ bool courseLit=sourceLightInfo.x!=0&&courseLightRange!=0&&showroomLight.w==0&&original!=0;
+ if(courseLit){
+  if((gmp&512)==0)courseColors(c,offset,mul(float4(world,1),sourceLightView).xyz,mul(float4(n,0),sourceLightView).xyz,glossCoefficient);
+  // ELAN adds untextured offset RGBA before pixel alpha selection.
+  if((pcw&8)==0){c+=offset;offset=0;}
+ }
+ // Original 112260/053480 showroom GLM: one nonzero white parallel light,
+ // ambient multiplied by base material, and specular routed to offset.
+ // ELAN computes these colors per vertex before texturing. The b0 material
+ // bit bypasses the entire light model, including ambient and highlights.
+ if(showroomLight.w!=0&&original!=0&&(gmp&512)==0){
+  float3 normal=rawNormal*rsqrt(max(dot(rawNormal,rawNormal),1e-10));
+  float3 toLight=normalize(showroomLight.xyz);
+  float3 incident=p-eye.xyz;incident*=rsqrt(max(dot(incident,incident),1e-10));
+  float diffuse=showroomTerms.y*max(dot(normal,toLight),0);
+  float specular=showroomTerms.y*pow(max(dot(toLight,reflect(incident,normal)),0),glossCoefficient);
+  c=saturate(float4(rawColor.rgb*(showroomTerms.x+diffuse*sceneLightColor.rgb),rawColor.a));
+  offset=saturate(float4(rawOffset.rgb*specular*sceneLightColor.rgb,rawOffset.a));
+ }
+ // Only imported courses supplement the car's retained D3 source light
+ // array. Lamp data and the enable bit reset when leaving the course.
+ if(lampDirection.w>0&&atmosphere.w>0&&_LightScope>=2&&original!=0&&emissive==0&&(gmp&512)==0){
+  float3 normal=n*rsqrt(max(dot(n,n),1e-10));
+  c.rgb=saturate(c.rgb+rawColor.rgb*idasCourseLampLight(world,normal));
+ }
+}
+#endif
 Texture2D _MainTex;SamplerState sampler_MainTex;
 P mainVS(V v){UNITY_SETUP_INSTANCE_ID(v);P o;o.treeFace=v.treeFace.x;o.sponsorAxis=v.treeFace.y;
 #if defined(IDAS_IMPORTED_COURSE)
@@ -183,48 +245,29 @@ P mainVS(V v){UNITY_SETUP_INSTANCE_ID(v);P o;o.treeFace=v.treeFace.x;o.sponsorAx
  // vertices carry the same geometric plane, separate from lighting normals.
  // Reject only the hidden paired side, in object space, before rasterization.
  // This also works with the mirror's projection and reflected view convention.
- o.faceVisibility=v.treeFace.x>.5&&dot(v.facePlane,float4(mul(unity_WorldToObject,float4(eye.xyz,1)).xyz,1))<=0?-1:1;
+ bool hiddenFace=v.treeFace.x>.5&&dot(v.facePlane,float4(mul(unity_WorldToObject,float4(eye.xyz,1)).xyz,1))<=0;
+#if defined(IDAS_COLLAPSE_HIDDEN_FACES)
+ if(hiddenFace)o.p=IDAS_HIDDEN_TRIANGLE;
+#else
+ o.faceVisibility=hiddenFace?-1:1;
+#endif
 #endif
  return o;
 #else
- o.p=mul(float4(v.p,1),viewProjection);o.world=v.p;o.n=v.n;o.c=v.c;o.uv=v.uv;o.offsetColor=v.offsetColor;
- if(billboard!=0){float3 facing=cross(cameraRight.xyz,cameraUp.xyz);
-  float localZ=v.p.z;float3 localNormal=float3(0,0,1);
-  if((gmp&512)==0){
-   // Lit source cards are planar. LocalZ carries their exact source normal
-   // bytes, not a displaced coordinate; retain signed byte/127 semantics.
-   uint packed=(uint)(v.p.z*16777216.0);
-   int3 bytes=int3((int)(packed<<24),(int)(packed<<16),(int)(packed<<8))>>24;
-   localNormal=float3(bytes)/127.0;localZ=0;
-  }
-  o.world=v.n+cameraRight.xyz*v.p.x+cameraUp.xyz*v.p.y+facing*localZ;
-  o.p=mul(float4(o.world,1),viewProjection);
-  o.n=cameraRight.xyz*localNormal.x+cameraUp.xyz*localNormal.y+facing*localNormal.z;}
- bool courseLit=sourceLightInfo.x!=0&&courseLightRange!=0&&showroomLight.w==0&&original!=0;
- if(courseLit){
-  if((gmp&512)==0)courseColors(o.c,o.offsetColor,mul(float4(o.world,1),sourceLightView).xyz,mul(float4(o.n,0),sourceLightView).xyz,glossCoefficient);
-  // ELAN adds untextured offset RGBA before pixel alpha selection.
-  if((pcw&8)==0){o.c+=o.offsetColor;o.offsetColor=0;}
+ idasPlaceVertex(v.p,v.n,o.world,o.n);
+ o.p=mul(float4(o.world,1),viewProjection);o.uv=v.uv;
+ float3 lightPosition=v.p,lightNormal=v.n,lightWorld=o.world,lightPlaced=o.n;
+ o.c=v.c;o.offsetColor=v.offsetColor;
+#if defined(IDAS_VERTEX_FACES)
+ // ELAN flat shading uses the final source strip vertex after lighting (see
+ // showroomGeometry). Every corner lights the final vertex's own inputs, so
+ // all three produce the identical color without the GPU provoking vertex.
+ if(original!=0&&(pcw&2)==0){
+  lightPosition=v.finalPosition;lightNormal=v.finalNormal;o.c=v.finalColor;o.offsetColor=v.finalOffset;
+  idasPlaceVertex(lightPosition,lightNormal,lightWorld,lightPlaced);
  }
- // Original 112260/053480 showroom GLM: one nonzero white parallel light,
- // ambient multiplied by base material, and specular routed to offset.
- // ELAN computes these colors per vertex before texturing. The b0 material
- // bit bypasses the entire light model, including ambient and highlights.
- if(showroomLight.w!=0&&original!=0&&(gmp&512)==0){
-  float3 n=v.n*rsqrt(max(dot(v.n,v.n),1e-10));
-  float3 toLight=normalize(showroomLight.xyz);
-  float3 incident=v.p-eye.xyz;incident*=rsqrt(max(dot(incident,incident),1e-10));
-  float diffuse=showroomTerms.y*max(dot(n,toLight),0);
-  float specular=showroomTerms.y*pow(max(dot(toLight,reflect(incident,n)),0),glossCoefficient);
-  o.c=saturate(float4(v.c.rgb*(showroomTerms.x+diffuse*sceneLightColor.rgb),v.c.a));
-  o.offsetColor=saturate(float4(v.offsetColor.rgb*specular*sceneLightColor.rgb,v.offsetColor.a));
- }
- // Only imported courses supplement the car's retained D3 source light
- // array. Lamp data and the enable bit reset when leaving the course.
- if(lampDirection.w>0&&atmosphere.w>0&&_LightScope>=2&&original!=0&&emissive==0&&(gmp&512)==0){
-  float3 n=o.n*rsqrt(max(dot(o.n,o.n),1e-10));
-  o.c.rgb=saturate(o.c.rgb+v.c.rgb*idasCourseLampLight(o.world,n));
- }
+#endif
+ idasVertexLight(lightPosition,lightNormal,lightWorld,lightPlaced,o.c,o.offsetColor);
  // ELAN's ordinary environment map adds view-normal XY/2+.5 to authored UV.
  if(original!=0&&(gmp&(1<<11))!=0){float3 n=normalize(v.n);o.uv=saturate(v.uv+float2(dot(n,cameraRight.xyz),dot(n,cameraUp.xyz))*.5+.5);}
  // Interpolate reciprocal clip depth linearly in screen space, matching the
@@ -240,9 +283,18 @@ P mainVS(V v){UNITY_SETUP_INSTANCE_ID(v);P o;o.treeFace=v.treeFace.x;o.sponsorAx
   ? _IdasDepthProjection.x-_IdasDepthProjection.y*o.p.w
   : o.p.w-o.p.z;
 #endif
+#if defined(IDAS_VERTEX_FACES)
+ // Same world-space winding rule as showroomGeometry, before projection.
+ // The plane is cross(p1-p0,p2-p0) with w=-dot(cross,p0) on all corners.
+ if(courseCullMode>=2){
+  float facing=dot(v.facePlane.xyz,eye.xyz)+v.facePlane.w;
+  if((courseCullMode==2&&facing>=0)||(courseCullMode==3&&facing<=0))o.p=IDAS_HIDDEN_TRIANGLE;
+ }
+#endif
  return o;
 #endif
 }
+#if !defined(IDAS_VERTEX_FACES)
 // ELAN flat shading uses the final source strip vertex after lighting. D3D's
 // default provoking vertex differs, so select the recovered final vertex
 // explicitly for showroom and course GLM passes.
@@ -276,6 +328,7 @@ void showroomGeometry(triangle P input[3],inout TriangleStream<P> stream){
  }
 #endif
 }
+#endif
 float4 mainPS(P v):SV_TARGET{
 #if defined(IDAS_IMPORTED_COURSE)
  float2 shadowUv=_ImportedShadowUv==0?v.uv:v.offsetColor.xy;

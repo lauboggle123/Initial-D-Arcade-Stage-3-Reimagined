@@ -15,7 +15,7 @@ All approaches are checked against the CLAUDE.md rule: where the original author
 |---|---|---|
 | 1 | Native `.so`, Android Unity build, boot on device, touch controls | **Done**, committed `f9303aaa` |
 | 2 | Test environment: hold every countdown except the race start | **Done**, committed `84c7d10c` |
-| 3 | Shader path without geometry shader; course packs on Android | **On hold.** First attempt reverted to `stash@{0}` (not resumable as-is); course packs reworked to avoid transcoding |
+| 3 | Shader path without geometry shader; course packs on Android | **Built, A/B-tested on Adreno with the fallback forced (2026-10-24)**; needs a real Mali device |
 | 4 | ROM import, lifecycle/saves, custom music import, phone options | **Device-tested 2026-10-24, all pass** (uncommitted; small wording follow-ups below) |
 | 4b | Touch controls options: layout editing, steering sensitivity, tilt | **Done, device-tested 2026-10-24** (tilt confirmed by hand) |
 | 5 | Performance tiers, resolution, profiling on low/mid phones | Not started |
@@ -60,8 +60,25 @@ All approaches are checked against the CLAUDE.md rule: where the original author
 - Device (via the skill): with the flag on, wait about 2 minutes on Title, Save Select, Transmission, Game Mode, Name entry and Time Attack Continue, and screenshot that nothing advanced. Park in a Time Attack race for 3 minutes with no TIME IS UP. Confirm the dialogs still page by themselves and the 3-2-1 still runs. Remove the flag and confirm the original timers return. Check that real saves under `userdata-unity-scene` are untouched.
 - Clean up the phone: remove the obsolete `test-hold-menu-countdowns` and `ab-geometry-shader` flag files.
 
-## Phase 3 — shader path without geometry shader; course packs (on hold)
-What was tried (all in `stash@{0}`: `git stash apply stash@{0}`):
+## Phase 3 — shader path without geometry shader; course packs (built)
+As built (2026-10-24), following "Proposed when resumed" below:
+- Scene shaders (`Idas3Scene`, `Idas3SceneDirect`, `Idas3OpaqueAlphaDepth`): the original geometry-stage SubShader is unchanged at `LOD 200`; a second `LOD 100`, target 4.5 SubShader defines `IDAS_VERTEX_FACES`. Unity picks it automatically where target 5.0 is unsupported. `Idas3Platform.SceneVertexFaces` (no geometry shaders, `-idas3-vertex-faces`, or a `vertex-faces` flag file) also forces it via `Shader.maximumLOD` for A/B on Adreno. Before, a GPU without geometry shaders could not start the scene renderer at all ("Original Unity scene shader is unavailable").
+- D3 ranges that need the geometry stage (`courseCullMode >= 2` or final-vertex flat colour) get 136-byte vertices on that path only (`Idas3SceneRenderer.WideVertex`): the triangle's world plane `cross(p1-p0,p2-p0), -dot(cross,p0)` and the final vertex's position/normal/colours, identical on all three corners. The vertex stage applies `showroomGeometry`'s winding rule against `eye` and collapses hidden triangles to one point; flat ranges light the final vertex's inputs once. No provoking vertex, no `nointerpolation`, no hardware culling.
+- Imported courses use their existing per-vertex planes (`SceneryFacePlanes`) on that path: Stage 8 courses as well as IDZero (tree packing stays IDZero-only); Enna's paired guardrails/gates are un-indexed so each triangle has its own plane. All imported placements use positive scale, so the object-space test equals the geometry stage's world-space test.
+- Course textures: `Idas3DxtDecoder` expands each declared DXT1/DXT5 mip to RGBA32 when the GPU lacks BC (`Idas3Platform.DecodeCompressedTextures`; force with `-idas3-decode-dxt` / `decode-dxt` file). Packs are never transcoded. 35 of 626 pack textures store more levels than their header declares; like `LoadRawTextureData`, the declared chain is read from the start. `python Tests/Courses/test_dxt_decoder.py` checks hand-built BC1/BC3 blocks and decodes all 626.
+- `Idas3PerformanceLog` restored from `stash@{0}` (now opt-in: `-idas3-perf-log` or a `perf-log` flag file); `IdasDevice.ps1` `Set-IdasFlag vertex-faces|perf-log`.
+
+Pre-existing Android bugs found and fixed on the way (affected Adreno too):
+- No imported course (Hakone, Sadamine, Tsubaki, Gunsai, …) ever drew on Android: their materials declare `_ImportedLampCells/_ImportedLampLights`, bound only for IDZero night packs, and Vulkan skips draws with unbound buffers ("Attempting to draw with missing bindings"). The renderer now binds empty global placeholders.
+- `Idas3SceneDirect`'s `IDAS_IMPORTED_VERTEX_FACES` variant failed to compile for Vulkan (`GL_ARB_cull_distance` unsupported). Outside D3D11 hidden paired faces now collapse instead of using `SV_CullDistance`; D3D11 is unchanged.
+
+Results (Red Magic 9 Pro / Adreno 750, test environment, 2480×1116, 4× MSAA):
+- Akina Time Attack, 15 s of driving: geometry stage ~60 FPS, GPU 14.0–15.0 ms, render thread 7.6–10.4 ms; vertex faces ~60 FPS, GPU 13.3–14.4 ms, render thread 7.4–9.4 ms, 1,872 of 1,912 ranges wide. (The `stash@{0}` attempt was 52.6 FPS.)
+- Image parity, car held on the brake at the start line: within one mode 2 s apart, 216/447 of 586,044 view pixels differ by >8/255 (max 64); geometry stage vs vertex faces 572 (max 65), i.e. at the scene's own frame-to-frame noise.
+- Hakone: draws in both modes (GPU ~16 ms geometry stage, ~12–14 ms vertex faces), trees and paired faces one-sided; with DXT decode forced, renders correctly, course load ~21 s.
+- Not yet verified: a real Mali/no-geometry-shader GPU; Enna (Special Stage) on device; the Windows D3D11 build (Android-only compiles here; the D3D11 SubShader 0 change is a refactor of the same vertex code); decoded-texture GPU memory (dumpsys on this phone does not report it). Estimated: RGBA32 is 8× DXT1 / 4× DXT5, e.g. GUNSAI's 4096² DXT1 atlas ≈ 85 MB with mips (see Phase 5 memory).
+
+What was tried first (all in `stash@{0}`, also kept on branch `android-phase3-stash-backup`):
 - Vertex-stage replacement for the geometry stage (reads each triangle's vertices from the range mesh's raw vertex buffer; Vulkan SubShaders at target 4.5; D3D11 unchanged).
 - `Idas3PerformanceLog` (per-second CSV + logcat: FPS, frame-time spread, CPU main/render, GPU, native time, thermal), A/B test shaders, native `Idas3SceneHoldMenuCountdowns` test hook (superseded by Phase 2).
 
@@ -135,7 +152,7 @@ Results (2026-10-24, test environment): new rows and defaults shown; drag moved 
 - Device tiers (auto-detected, user override): Low = 30 FPS, ~60% render scale, no MSAA, mirror off; Mid = 60 FPS target, ~75% scale, MSAA 2×, mirror at reduced rate; High = native, MSAA 4×.
 - Render scale via scaled render target with UI at native resolution; dynamic resolution from frame time to absorb thermal throttling. Android ignores vSync count: drive `Application.targetFrameRate`. On the 120 Hz test phone, UNLIMITED (display refresh rate) still gives ~60 FPS on a light screen: likely Unity reports the window's 60 Hz mode (not yet checked), so higher rates probably need a preferred display mode / frame-rate request.
 - Reduce draw cost (the measured bottleneck) without changing source order: the renderer keeps "exact source list ordering, then exact submission ordering" and coplanar surfaces resolve by submission order (`Idas3SceneRenderer.cs:287`, `:646`), so merging or regrouping ranges is out. Allowed levers: cheaper per-draw state changes, a reduced-rate or optional mirror view, render scale.
-- Memory: no texture transcoding (see Phase 3). Use course unloading, optional mip limits as a setting, and on-demand audio banks.
+- Memory: no texture transcoding (see Phase 3). Use course unloading, optional mip limits as a setting, and on-demand audio banks. On GPUs without BC, Phase 3's decoded RGBA32 course textures are 4–8× larger than the packs (GUNSAI's 4096² atlas ≈ 85 MB); a mip limit there should skip the top decoded levels.
 - MSAA: imported foliage relies on MSAA to resolve derivative-scaled coverage (`Idas3SceneCommon.cginc`, "instead of binary leaf flicker"). Turning MSAA off on Low reintroduces leaf flicker; treat it as a visible trade-off, not a free saving.
 - Profile on at least one low and one mid phone (ideally Mali), using the Phase 2 test environment for long runs. Pass bar: Low holds 30 FPS (1% low ≥ 25) for 10 minutes without thermal collapse; Mid holds 60 on Akina/Akagi.
 
@@ -154,6 +171,6 @@ Results (2026-10-24, test environment): new rows and defaults shown; drag moved 
 
 ## Housekeeping
 - Pushed to `origin/android-port` (2026-10-24): Phases 1–2 (`f9303aaa`, `84c7d10c`), plan `3867b03f`, Phase 4 `8650edae`, display/frame-limit follow-up `da6c601f`, Phase 4b `3af0b0d2`, tilt fix `2a861fd3`. Uncommitted: `CLAUDE.md`, `.claude/skills/release/`.
-- `stash@{0}` (Phase 3 attempt) exists only in the original working copy; it is not on the remote.
+- `stash@{0}` (first Phase 3 attempt) exists only in the original working copy, also as local branch `android-phase3-stash-backup`; neither is on the remote. Its logger is now in the tree; the rest is superseded.
 - ~1,800 modified texture `.meta` files from the Android target switch: never commit.
 - Phone state (2026-10-24): app reinstalled fresh; base data + all 9 course packs pushed; ROM imported via the picker; test environment flag **on**; "stay awake on USB" enabled (`adb shell svc power stayon false` to undo). `userdata-unity-test` holds test driver "A" in slot 01 and TOUCH STEERING = TILT PHONE (35°): set it back to DRAG before scripted steering. `userdata-unity-scene` is a fresh real save (drag). `Custom Music` holds `idas3-test-tone.wav`.
