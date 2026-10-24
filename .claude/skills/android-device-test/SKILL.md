@@ -46,8 +46,11 @@ The build switches Unity's active target to Android and rewrites ~1,800 texture 
 
 ## Diagnostic flags (read at launch)
 
-- `Set-IdasFlag vertex-faces` forces the scene shaders' no-geometry-stage path (what Mali GPUs get); `Set-IdasFlag perf-log` writes `files/perf/perf-*.csv` and `IDAS3PERF` logcat rows (fps, CPU/GPU ms, `race-start`/`stage=` markers useful for waiting). Undo with `-Off`. A `decode-dxt` file (`adb shell touch .../files/decode-dxt`) forces CPU decoding of course DXT textures.
+- `Set-IdasFlag vertex-faces` forces the scene shaders' no-geometry-stage path (what Mali GPUs get); `Set-IdasFlag perf-log` writes `files/perf/perf-*.csv` and `IDAS3PERF` logcat rows (fps, CPU/GPU ms, `race-start`/`stage=` markers useful for waiting). `Set-IdasFlag decode-dxt` forces CPU decoding of course DXT textures (what GPUs without BC get). Undo with `-Off`; all flags are read at launch, so relaunch after changing one.
+- Confirm the active path from the log: `Get-IdasLog 'scene shaders'` (geometry stage vs vertex faces), `Get-IdasLog 'textures:'` (per-course texture count, MB as uploaded, decoded or not, and Unity texture memory — use it for memory comparisons; process PSS does not include texture memory on the Adreno test phone).
+- A/B image comparison between paths: hold BRAKE at the race start (the car stays put), screenshot, relaunch with the other flag and repeat. Always also take two screenshots ~2 s apart within one path: the scene has frame-to-frame noise (hundreds to thousands of pixels > 8/255), so a cross-path difference only means something when it exceeds that.
 - Imported courses: Hakone is 6 × Right from Akina on Course select and adds a time-of-day screen (4 × A to the race).
+- Leave the flags off when done, and record the phone's flag state in `docs/android-port-plan.md` Housekeeping.
 
 ## Game flow facts that break scripts
 

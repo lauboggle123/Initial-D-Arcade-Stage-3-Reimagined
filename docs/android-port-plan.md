@@ -15,8 +15,8 @@ All approaches are checked against the CLAUDE.md rule: where the original author
 |---|---|---|
 | 1 | Native `.so`, Android Unity build, boot on device, touch controls | **Done**, committed `f9303aaa` |
 | 2 | Test environment: hold every countdown except the race start | **Done**, committed `84c7d10c` |
-| 3 | Shader path without geometry shader; course packs on Android | **Built, A/B-tested on Adreno with the fallback forced (2026-10-24)**; needs a real Mali device |
-| 4 | ROM import, lifecycle/saves, custom music import, phone options | **Device-tested 2026-10-24, all pass** (uncommitted; small wording follow-ups below) |
+| 3 | Shader path without geometry shader; course packs on Android | **Built and verified 2026-10-24** (`06ad7e0f`, `c0cb50ca`): Adreno A/B with the fallback forced (Akina, Hakone, Enna), Windows D3D11 smokes on both paths, decoded-texture memory. Real Mali device **deferred by user** |
+| 4 | ROM import, lifecycle/saves, custom music import, phone options | **Done, device-tested 2026-10-24** (`8650edae`, follow-up `da6c601f`) |
 | 4b | Touch controls options: layout editing, steering sensitivity, tilt | **Done, device-tested 2026-10-24** (tilt confirmed by hand) |
 | 5 | Performance tiers, resolution, profiling on low/mid phones | Not started |
 | 6 | Data installer, APK updates, release packaging, docs | Not started |
@@ -79,7 +79,7 @@ Results (Red Magic 9 Pro / Adreno 750, test environment, 2480×1116, 4× MSAA):
 - Enna (phone): draws on both paths, ~60 FPS, GPU 12.9–13.9 ms either way. Held on the brake at the start, geometry stage vs vertex faces differ in 164 view pixels by >8/255 (max 19), less than two frames of one path 2 s apart (2,580–4,906, max 37–40).
 - Windows D3D11 (`Build Unity.cmd`, player run with `-idas3-mode-flow-smoke`): `-idas3-enna-gates-check` passes on both paths (241 / 401 checks; the extra checks are the vertex-face keyword) and its 16 captures are bit-identical between paths. `-idas3-pause-course-check` passes on both (83 checks, 7 captures: Momiji, Myogi SS, Usui SS, Enna, Hakone, Sadamine, Akina); 5 captures are bit-identical, Myogi SS differs in 781 pixels (0.19%, max 27) and Hakone in 7 (max 14), all in dark foliage at the frame edge. Two geometry-stage runs are bit-identical, so these are real path differences, not noise; most likely edge-on paired faces where the two plane tests round differently (not proven).
 - Decoded-texture memory (phone, uploaded size from the course log line, all mips): Hakone 13.1 → 70.4 MB, Sadamine 48.4 → 127.0 MB; Unity texture memory 31.5 → 88.8 MB and 67.5 → 146.1 MB. GUNSAI's 4096² DXT1 atlas alone is ≈ 85 MB decoded (calculated, not measured). Process PSS does not include it on this phone.
-- Still unverified: a real Mali/no-geometry-shader GPU.
+- Still unverified (deferred by user 2026-10-24, pick up when Mali hardware is available): a real Mali/no-geometry-shader GPU, which also exercises automatic SubShader selection and DXT decoding without forcing flags. Open questions for then: the Myogi SS/Hakone foliage-edge difference, and whether decoded memory needs Phase 5's mip limit on 4 GB phones.
 - The rebuilt Windows `Idas3Unity.dll` now exports `Idas3SceneSaveNow` (Phase 4 note).
 
 What was tried first (all in `stash@{0}`, also kept on branch `android-phase3-stash-backup`):
@@ -171,10 +171,11 @@ Results (2026-10-24, test environment): new rows and defaults shown; drag moved 
 - Then EOS Android SDK, online battles, leaderboard submission with a platform-specific build string.
 
 ## Testing tools
-- Project skill `.claude/skills/android-device-test` (`IdasDevice.ps1`): install, push data/ROM, named overlay taps/holds/steering computed from screen size, screenshots, Unity logs. Records game-flow gotchas (Game Mode/Transmission use left/right; hidden menu countdown auto-picks Legend; Time Attack timer; single injectable finger). Phase 2 adds `Set-IdasTestEnvironment`.
+- Project skill `.claude/skills/android-device-test` (`IdasDevice.ps1`): install, push data/ROM, named overlay taps/holds/steering computed from screen size, screenshots, Unity logs. Records game-flow gotchas (Game Mode/Transmission use left/right; hidden menu countdown auto-picks Legend; Time Attack timer; single injectable finger). Phase 2 adds `Set-IdasTestEnvironment`; Phase 3 adds `Set-IdasFlag vertex-faces|perf-log|decode-dxt` and the A/B screenshot method.
 
 ## Housekeeping
-- Pushed to `origin/android-port` (2026-10-24): Phases 1–2 (`f9303aaa`, `84c7d10c`), plan `3867b03f`, Phase 4 `8650edae`, display/frame-limit follow-up `da6c601f`, Phase 4b `3af0b0d2`, tilt fix `2a861fd3`. Uncommitted: `CLAUDE.md`, `.claude/skills/release/`.
+- Pushed to `origin/android-port` (2026-10-24): Phases 1–2 (`f9303aaa`, `84c7d10c`), plan `3867b03f`, Phase 4 `8650edae`, display/frame-limit follow-up `da6c601f`, Phase 4b `3af0b0d2`, tilt fix `2a861fd3`, housekeeping `3bf1f281`. Committed, **not pushed**: Phase 3 `06ad7e0f`, Phase 3 verification `c0cb50ca`. Uncommitted, awaiting the user's decision: `CLAUDE.md`, `.claude/skills/release/`.
+- Next: Phase 5 (performance tiers, mip limit, low/mid profiling) once hardware is available; Mali check for Phase 3 alongside it.
 - `stash@{0}` (first Phase 3 attempt) exists only in the original working copy, also as local branch `android-phase3-stash-backup`; neither is on the remote. Its logger is now in the tree; the rest is superseded.
 - ~1,800 modified texture `.meta` files from the Android target switch: never commit.
-- Phone state (2026-10-24): app reinstalled fresh; base data + all 9 course packs pushed; ROM imported via the picker; test environment flag **on**; "stay awake on USB" enabled (`adb shell svc power stayon false` to undo). `userdata-unity-test` holds test driver "A" in slot 01 and TOUCH STEERING = TILT PHONE (35°): set it back to DRAG before scripted steering. `userdata-unity-scene` is a fresh real save (drag). `Custom Music` holds `idas3-test-tone.wav`.
+- Phone state (2026-10-24): app reinstalled fresh; base data + all 9 course packs pushed; ROM imported via the picker; test environment flag **on**, `vertex-faces`/`perf-log`/`decode-dxt` **off**; "stay awake on USB" enabled (`adb shell svc power stayon false` to undo). `userdata-unity-test` holds test driver "A" in slot 01 and TOUCH STEERING = TILT PHONE (35°): set it back to DRAG before scripted steering. `userdata-unity-scene` is a fresh real save (drag). `Custom Music` holds `idas3-test-tone.wav`.
