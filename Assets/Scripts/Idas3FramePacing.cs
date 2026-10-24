@@ -43,7 +43,8 @@ public static class Idas3FramePacing
         fps=Math.Max(0,Math.Min(360,fps));
         QualitySettings.vSyncCount=vSync?1:0;
         if(vSync||fps==0||Application.isEditor||Application.platform!=RuntimePlatform.WindowsPlayer){
-            Shutdown();Application.targetFrameRate=fps==0?-1:fps;return;
+            // Mobile players read -1 as their 30 FPS default; uncapped there means the panel's refresh rate.
+            Shutdown();Application.targetFrameRate=fps!=0?fps:Application.isMobilePlatform?Math.Max(60,(int)Math.Round(Screen.currentResolution.refreshRateRatio.value)):-1;return;
         }
         if(limit==fps&&timer!=IntPtr.Zero){Application.targetFrameRate=-1;return;}
         Shutdown();

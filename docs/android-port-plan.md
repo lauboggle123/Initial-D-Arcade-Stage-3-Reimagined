@@ -104,7 +104,8 @@ Follow-ups found in testing (fixed on Android only; Windows text unchanged):
 - Steering & Wheel STRENGTH was a live slider: its callback wrote `wheelFeedbackStrength` past `Adjust`'s platform guard. It is now an N/A row on Android.
 - Online tab and ADD MUSIC entry say "device" instead of "computer"/"PC"; the Custom Music README written on Android does too.
 - Not a bug: the settings × first returns focus to the category list (`Back()`), then closes on a second press; same on Windows.
-- Not yet reviewed on Android: the Display & Graphics tab's DISPLAY MODE / RESOLUTION rows.
+- Display & Graphics tab: DISPLAY MODE and VERTICAL SYNC are N/A on Android (always full screen; both VSync branches pace by `targetFrameRate`), and the "Turn off VSync" hint is desktop-only. RESOLUTION stays: it lowers the render resolution and is what the BALANCED/LOW presets use.
+- FRAME LIMIT = UNLIMITED ran at 31 FPS on Android: `Idas3FramePacing` set `targetFrameRate=-1`, which mobile players treat as 30. Mobile now uses the display refresh rate (measured 61 FPS on the attract screen).
 
 ## Phase 4b — touch controls options (not started)
 **Why separate:** Phase 4 is written and only waiting for its device test; adding scope would delay that test and the commit. The touch overlay is independent of Phase 4's files and of the Phase 3 render path, so 4b can start once Phase 4 is committed.
@@ -123,7 +124,7 @@ Test (device): edit and save a race layout, relaunch and confirm it is kept; rot
 
 ## Phase 5 — performance for low/mid devices (not started)
 - Device tiers (auto-detected, user override): Low = 30 FPS, ~60% render scale, no MSAA, mirror off; Mid = 60 FPS target, ~75% scale, MSAA 2×, mirror at reduced rate; High = native, MSAA 4×.
-- Render scale via scaled render target with UI at native resolution; dynamic resolution from frame time to absorb thermal throttling. Android ignores vSync count: drive `Application.targetFrameRate`.
+- Render scale via scaled render target with UI at native resolution; dynamic resolution from frame time to absorb thermal throttling. Android ignores vSync count: drive `Application.targetFrameRate`. On the 120 Hz test phone, UNLIMITED (display refresh rate) still gives ~60 FPS on a light screen: likely Unity reports the window's 60 Hz mode (not yet checked), so higher rates probably need a preferred display mode / frame-rate request.
 - Reduce draw cost (the measured bottleneck) without changing source order: the renderer keeps "exact source list ordering, then exact submission ordering" and coplanar surfaces resolve by submission order (`Idas3SceneRenderer.cs:287`, `:646`), so merging or regrouping ranges is out. Allowed levers: cheaper per-draw state changes, a reduced-rate or optional mirror view, render scale.
 - Memory: no texture transcoding (see Phase 3). Use course unloading, optional mip limits as a setting, and on-demand audio banks.
 - MSAA: imported foliage relies on MSAA to resolve derivative-scaled coverage (`Idas3SceneCommon.cginc`, "instead of binary leaf flicker"). Turning MSAA off on Low reintroduces leaf flicker; treat it as a visible trade-off, not a free saving.
@@ -144,7 +145,7 @@ Test (device): edit and save a race layout, relaunch and confirm it is kept; rot
 
 ## Housekeeping
 - Pushed: `origin/android-port` (`f9303aaa`, `84c7d10c`).
-- Uncommitted on `android-port`: Phase 4 changes, `CLAUDE.md`.
+- Committed (not pushed): Phase 4 `8650edae` and the Display & Graphics / frame-limit follow-up. Uncommitted: `CLAUDE.md`, `.claude/skills/release/`.
 - `stash@{0}` (Phase 3 attempt) exists only in the original working copy; it is not on the remote.
 - ~1,800 modified texture `.meta` files from the Android target switch: never commit.
 - Phone state (2026-10-24): app reinstalled fresh; base data + all 9 course packs pushed; ROM imported via the picker; test environment flag off; "stay awake on USB" enabled (`adb shell svc power stayon false` to undo). `userdata-unity-test` holds test driver "A" in slot 01; `Custom Music` holds `idas3-test-tone.wav`.

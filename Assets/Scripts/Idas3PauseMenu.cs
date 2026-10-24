@@ -289,7 +289,7 @@ public sealed class Idas3PauseMenu : MonoBehaviour
     // are read-only on Android: no Discord desktop app, DirectInput wheels or
     // unfocused-window audio there.
     private bool NotOnThisPlatform(int row)=>Idas3Platform.IsAndroid&&!hudSizesOpen&&
-        ((tab==0&&row==5)||(tab==5&&row==2)||(tab==4&&row>=3&&row<=6));
+        ((tab==0&&row==5)||(tab==5&&row==2)||(tab==4&&row>=3&&row<=6)||(tab==1&&(row==0||row==2)));
     private static string PlatformValue(string value)=>Idas3Platform.IsAndroid?"N/A ON ANDROID":value;
     private void Adjust(int row,int direction){
         var v=options.Draft;
@@ -511,8 +511,9 @@ public sealed class Idas3PauseMenu : MonoBehaviour
             ChoiceRow(4,"MAP / WATER CUP SIZE",v.HudSizePercent(5)+"%");
             ChoiceRow(5,"MINIMAP ZOOM OUT",new[]{"WIDEST (50%)","WIDER (75%)","ORIGINAL"}[v.minimapZoom]);
         }else if(tab==1){
-            ChoiceRow(0,"DISPLAY MODE",DisplayModes[v.displayMode]);ChoiceRow(1,"RESOLUTION",v.width+" × "+v.height);
-            ChoiceRow(2,"VERTICAL SYNC",v.vSync?"ON":"OFF");ChoiceRow(3,"FRAME LIMIT",v.frameRateLimit==0?"UNLIMITED":v.frameRateLimit+" FPS");
+            // Android is always full screen and paces by target frame rate, so window mode and VSync do nothing there.
+            ChoiceRow(0,"DISPLAY MODE",PlatformValue(DisplayModes[v.displayMode]));ChoiceRow(1,"RESOLUTION",v.width+" × "+v.height);
+            ChoiceRow(2,"VERTICAL SYNC",PlatformValue(v.vSync?"ON":"OFF"));ChoiceRow(3,"FRAME LIMIT",v.frameRateLimit==0?"UNLIMITED":v.frameRateLimit+" FPS");
             ChoiceRow(4,"ANTI-ALIASING",v.antiAliasing==0?"OFF":v.antiAliasing+"× MSAA");
             int preset=Idas3GameOptions.PerformancePreset(v);
             ChoiceRow(5,"QUALITY PRESET",preset<0?"CUSTOM":new[]{"ORIGINAL","BALANCED","LOW"}[preset]);
@@ -521,7 +522,7 @@ public sealed class Idas3PauseMenu : MonoBehaviour
             ChoiceRow(8,"TRACK LIGHTING",v.trackLighting==0?"ORIGINAL":"BALANCED");
             ChoiceRow(9,"SUN GLARE",v.sunGlare?"ON":"OFF");
             ChoiceRow(10,"SHOW FRAME RATE",v.showFps?"ON":"OFF");
-            Text(new Rect(288,522,687,20),v.vSync?"Turn off VSync to use the frame limit.":"Display changes must be confirmed within 15 seconds.",small);
+            Text(new Rect(288,522,687,20),v.vSync&&!Idas3Platform.IsAndroid?"Turn off VSync to use the frame limit.":"Display changes must be confirmed within 15 seconds.",small);
         }else if(tab==2){
             ChoiceRow(0,"DEFAULT CAMERA",CameraModes[v.defaultCamera]);
             FovRow(1,v);
