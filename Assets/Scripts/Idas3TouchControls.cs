@@ -106,15 +106,16 @@ public sealed class Idas3TouchControls : MonoBehaviour
         else steering = steerFinger < 0 ? 0 : Mathf.Clamp((steerPoint.x - steerAnchor.x) / Travel, -1, 1);
     }
 
-    // Roll of the phone in the screen plane, from gravity: tilting it clockwise
-    // like a wheel steers right. LandscapeLeft has the phone's top edge on the left.
+    // Roll of the phone in the screen plane, from gravity: turning it clockwise
+    // like a wheel steers right. Unity reports acceleration in the current
+    // screen's axes (measured on device: held level in landscape, gravity is
+    // -y; clockwise moves it to +x), so tilting the screen back changes only
+    // y/z and does not steer.
     float TiltSteering()
     {
         var g = Input.acceleration;
-        bool right = Screen.orientation == ScreenOrientation.LandscapeRight;
-        float lateral = right ? g.y : -g.y, down = right ? g.x : -g.x;
-        if (lateral * lateral + down * down < .04f) return 0; // Phone lying flat: no usable roll.
-        return Mathf.Clamp(Mathf.Atan2(lateral, down) * Mathf.Rad2Deg / settings.touchTiltDegrees, -1, 1);
+        if (g.x * g.x + g.y * g.y < .04f) return 0; // Phone lying flat: no usable roll.
+        return Mathf.Clamp(Mathf.Atan2(g.x, -g.y) * Mathf.Rad2Deg / settings.touchTiltDegrees, -1, 1);
     }
 
     void Release() { fingers.Clear(); held.Clear(); steerFinger = -1; steering = 0; }

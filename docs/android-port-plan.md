@@ -17,7 +17,7 @@ All approaches are checked against the CLAUDE.md rule: where the original author
 | 2 | Test environment: hold every countdown except the race start | **Done**, committed `84c7d10c` |
 | 3 | Shader path without geometry shader; course packs on Android | **On hold.** First attempt reverted to `stash@{0}` (not resumable as-is); course packs reworked to avoid transcoding |
 | 4 | ROM import, lifecycle/saves, custom music import, phone options | **Device-tested 2026-10-24, all pass** (uncommitted; small wording follow-ups below) |
-| 4b | Touch controls options: layout editing, steering sensitivity, tilt | **Built and device-tested 2026-10-24**; tilt direction needs a person |
+| 4b | Touch controls options: layout editing, steering sensitivity, tilt | **Done, device-tested 2026-10-24** (tilt confirmed by hand) |
 | 5 | Performance tiers, resolution, profiling on low/mid phones | Not started |
 | 6 | Data installer, APK updates, release packaging, docs | Not started |
 | 7 | Determinism gate, then online + leaderboard submission | Not started |
@@ -126,10 +126,10 @@ As built:
 - Steering & Wheel tab on Android: the wheel force feedback rows are replaced by TOUCH STEERING (DRAG / TILT PHONE), FULL LOCK (drag 6–30% of screen height, default 15; tilt 10–60°, default 30) and EDIT TOUCH LAYOUT.
 - `Idas3TouchControls` editor (pause menu hidden meanwhile): RACE / MENU layouts, drag to move, SIZE ± (50–200%), FADE ± (20–100%), RESET, RESET ALL, CANCEL, SAVE. Yellow boxes mark the default record panel, tachometer and car; warnings for covering them and for overlapping controls. Saves through `Idas3GameOptions.ApplyTouchLayout` (own transaction, like the HUD editor).
 - Overlapping controls: a touch goes to the nearest centre (was first in list order, which let a moved A swallow VIEW).
-- Tilt: roll from gravity, light smoothing; the drag zone is off and the track shows TILT TO STEER.
+- Tilt: roll in the screen plane, `atan2(g.x, -g.y)`, light smoothing; the drag zone is off and the track shows TILT TO STEER. Unity reports `Input.acceleration` in the current screen's axes (measured: level landscape g≈(0,-0.85,-0.52); clockwise → +x; tilting the screen back only trades y for z). The first version assumed portrait device axes and read level as a 90° turn (near full right lock).
 - `IdasDevice.ps1` `Get-IdasPoint`/`Invoke-IdasSteer` read the saved layout and full lock from the active save folder (edge clamping not mirrored).
 
-Results (2026-10-24, test environment): new rows and defaults shown; drag moved A; SIZE+ ×2 / FADE− saved as 120% / 80%; layout kept after relaunch; scripted `Invoke-IdasTap A` hit the moved button; overlap and HUD-cover warnings shown; RESET ALL + SAVE restored defaults; TILT PHONE / 35° applied and the race shows TILT TO STEER. Not verifiable by script: tilt direction and feel (adb cannot drive the accelerometer); the LandscapeLeft/Right sign is untested.
+Results (2026-10-24, test environment): new rows and defaults shown; drag moved A; SIZE+ ×2 / FADE− saved as 120% / 80%; layout kept after relaunch; scripted `Invoke-IdasTap A` hit the moved button; overlap and HUD-cover warnings shown; RESET ALL + SAVE restored defaults; TILT PHONE / 35° applied and the race shows TILT TO STEER. Tilt direction and feel confirmed by hand after the axis fix (adb cannot drive the accelerometer). Only LandscapeLeft was measured; the screen-axis formula should hold for LandscapeRight.
 
 ## Phase 5 — performance for low/mid devices (not started)
 - Device tiers (auto-detected, user override): Low = 30 FPS, ~60% render scale, no MSAA, mirror off; Mid = 60 FPS target, ~75% scale, MSAA 2×, mirror at reduced rate; High = native, MSAA 4×.
