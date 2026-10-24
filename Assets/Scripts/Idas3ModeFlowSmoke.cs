@@ -575,7 +575,10 @@ public sealed class Idas3ModeFlowSmoke : MonoBehaviour {
                     var material=renderer.sharedMaterial;
                     if(material==null||!material.name.StartsWith("Enna ")||!IdasSpecialStageEnnaCourse.IsPairedGateTexture(material.name.Substring(5)))continue;
                     paired++;
-                    Check(material.shader.name==Resources.Load<Shader>(baseline?"Idas3SceneDirect":"Idas3Scene").name,"Gate face selection shader");
+                    // Without a geometry stage paired gates use the direct shader's per-vertex planes.
+                    bool vertexFaces=!baseline&&Idas3Platform.SceneVertexFaces;
+                    Check(material.shader.name==Resources.Load<Shader>(baseline||vertexFaces?"Idas3SceneDirect":"Idas3Scene").name,"Gate face selection shader");
+                    if(vertexFaces)Check(material.IsKeywordEnabled("IDAS_IMPORTED_VERTEX_FACES"),"Gate vertex-face rejection enabled");
                 }
                 Check(paired==10,"All active start and finish paired gate skins present");
                 yield return Capture("enna-gates-"+fixture);

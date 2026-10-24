@@ -76,7 +76,11 @@ Results (Red Magic 9 Pro / Adreno 750, test environment, 2480×1116, 4× MSAA):
 - Akina Time Attack, 15 s of driving: geometry stage ~60 FPS, GPU 14.0–15.0 ms, render thread 7.6–10.4 ms; vertex faces ~60 FPS, GPU 13.3–14.4 ms, render thread 7.4–9.4 ms, 1,872 of 1,912 ranges wide. (The `stash@{0}` attempt was 52.6 FPS.)
 - Image parity, car held on the brake at the start line: within one mode 2 s apart, 216/447 of 586,044 view pixels differ by >8/255 (max 64); geometry stage vs vertex faces 572 (max 65), i.e. at the scene's own frame-to-frame noise.
 - Hakone: draws in both modes (GPU ~16 ms geometry stage, ~12–14 ms vertex faces), trees and paired faces one-sided; with DXT decode forced, renders correctly, course load ~21 s.
-- Not yet verified: a real Mali/no-geometry-shader GPU; Enna (Special Stage) on device; the Windows D3D11 build (Android-only compiles here; the D3D11 SubShader 0 change is a refactor of the same vertex code); decoded-texture GPU memory (dumpsys on this phone does not report it). Estimated: RGBA32 is 8× DXT1 / 4× DXT5, e.g. GUNSAI's 4096² DXT1 atlas ≈ 85 MB with mips (see Phase 5 memory).
+- Enna (phone): draws on both paths, ~60 FPS, GPU 12.9–13.9 ms either way. Held on the brake at the start, geometry stage vs vertex faces differ in 164 view pixels by >8/255 (max 19), less than two frames of one path 2 s apart (2,580–4,906, max 37–40).
+- Windows D3D11 (`Build Unity.cmd`, player run with `-idas3-mode-flow-smoke`): `-idas3-enna-gates-check` passes on both paths (241 / 401 checks; the extra checks are the vertex-face keyword) and its 16 captures are bit-identical between paths. `-idas3-pause-course-check` passes on both (83 checks, 7 captures: Momiji, Myogi SS, Usui SS, Enna, Hakone, Sadamine, Akina); 5 captures are bit-identical, Myogi SS differs in 781 pixels (0.19%, max 27) and Hakone in 7 (max 14), all in dark foliage at the frame edge. Two geometry-stage runs are bit-identical, so these are real path differences, not noise; most likely edge-on paired faces where the two plane tests round differently (not proven).
+- Decoded-texture memory (phone, uploaded size from the course log line, all mips): Hakone 13.1 → 70.4 MB, Sadamine 48.4 → 127.0 MB; Unity texture memory 31.5 → 88.8 MB and 67.5 → 146.1 MB. GUNSAI's 4096² DXT1 atlas alone is ≈ 85 MB decoded (calculated, not measured). Process PSS does not include it on this phone.
+- Still unverified: a real Mali/no-geometry-shader GPU.
+- The rebuilt Windows `Idas3Unity.dll` now exports `Idas3SceneSaveNow` (Phase 4 note).
 
 What was tried first (all in `stash@{0}`, also kept on branch `android-phase3-stash-backup`):
 - Vertex-stage replacement for the geometry stage (reads each triangle's vertices from the range mesh's raw vertex buffer; Vulkan SubShaders at target 4.5; D3D11 unchanged).
@@ -103,7 +107,7 @@ Proposed when resumed:
 - Options: Discord, wheel force feedback, mute-when-unfocused show "N/A ON ANDROID" and ignore changes; Updates tab explains APK updates; "saved on this device".
 - Deferred to Phase 4b (user decision): touch steering sensitivity / tilt options.
 - Rule review: no conflicts found. The "a local original dump is never read or copied" comment in `Idas3Build.cs` concerns builds and release packaging; the importer copies only the file the player picks into the app's own `rom` folder at runtime, and nothing is ever bundled.
-- Note: the committed Windows `Idas3Unity.dll` lacks `Idas3SceneSaveNow`; rebuild before a Windows release.
+- Note: the Windows `Idas3Unity.dll` was rebuilt with Phase 3 (2026-10-24) and now exports `Idas3SceneSaveNow`.
 
 Test (device, in the Phase 2 test environment where timing matters): import ROM from Download via the picker; race, press Home mid-race and return (pause menu shown); force-close and relaunch (selection/progress kept); import a music track; check options rows.
 

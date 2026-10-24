@@ -97,6 +97,7 @@ public sealed partial class Idas8HakoneCourse : MonoBehaviour
         foreach(Transform child in GetComponentsInChildren<Transform>())child.gameObject.layer=28;
         lightingProfile=-1;foliageSamples=-1;variant=selected;
         Debug.Log("HAKONE condition loaded: "+selected+" / "+data.source);
+        Debug.Log($"{LoadedCourse} textures: {textures.Count}, {TextureBytes()/1048576.0:F1} MB as uploaded ({(Idas3Platform.DecodeCompressedTextures?"DXT decoded to RGBA32":"DXT kept")}); Unity texture memory {UnityEngine.Texture.currentTextureMemory/1048576.0:F1} MB");
     }
     void ClearScene(){
         ClearLampLightingGrid();
@@ -123,6 +124,16 @@ public sealed partial class Idas8HakoneCourse : MonoBehaviour
         if(textures.TryGetValue(name,out var cached)) return cached;
         var t=DecodeTexture(File.ReadAllBytes(Path.Combine(root,Path.GetFileName(name))),name);
         textures.Add(name,t); return t;
+    }
+    // Bytes of every loaded course texture at its uploaded format, all mips.
+    long TextureBytes(){
+        long total=0;
+        foreach(var t in textures.Values){
+            double perPixel=t.format==TextureFormat.DXT1?.5:t.format==TextureFormat.DXT5?1:t.format==TextureFormat.RGB565?2:4;
+            for(int level=0,w=t.width,h=t.height;level<t.mipmapCount;++level,w=Math.Max(1,w/2),h=Math.Max(1,h/2))
+                total+=t.format==TextureFormat.DXT1||t.format==TextureFormat.DXT5?(long)((w+3)/4)*((h+3)/4)*(t.format==TextureFormat.DXT1?8:16):(long)(w*h*perPixel);
+        }
+        return total;
     }
     static bool loggedDxtDecode;
     internal static Texture2D DecodeTexture(byte[] bytes,string name) {
