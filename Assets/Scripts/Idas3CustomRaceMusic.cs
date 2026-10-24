@@ -52,7 +52,7 @@ public sealed class Idas3CustomRaceMusic : MonoBehaviour
     void RefreshMenu(){
         var entries=new List<Idas3RaceMusicMenu.Entry>(catalog.Entries);
         foreach(var t in Idas3SoundRoomCatalog.Packaged)entries.Add(Idas3SoundRoomCatalog.Entry(t));
-        entries.Add(new Idas3RaceMusicMenu.Entry{id=AddId,stage=9,title="ADD MUSIC…",artist="Import an MP3, OGG or WAV file from this PC"});
+        entries.Add(new Idas3RaceMusicMenu.Entry{id=AddId,stage=9,title="ADD MUSIC…",artist="Import an MP3, OGG or WAV file from this "+(Idas3Platform.IsAndroid?"device":"PC")});
         for(int i=0;i<library.songs.Count;i++){var s=library.songs[i];entries.Add(new Idas3RaceMusicMenu.Entry{id=FirstId+i,key="custom."+s.file,stage=9,title=s.title,artist="Custom music",collection="Custom",duration=(float)s.samples/s.channels/s.rate,pcmPath=Path.Combine(folder,s.file),pcmRate=s.rate,pcmChannels=s.channels});}
         menu.ReplaceCatalog(entries.ToArray(),SelectedId);
     }
@@ -66,7 +66,7 @@ public sealed class Idas3CustomRaceMusic : MonoBehaviour
         if(Directory.Exists(FolderPath)&&(File.GetAttributes(FolderPath)&FileAttributes.ReparsePoint)!=0)throw new IOException();
         Directory.CreateDirectory(FolderPath);
         string readme=Path.Combine(FolderPath,"README.txt");
-        if(!File.Exists(readme))File.WriteAllText(readme,ReadmeText,new UTF8Encoding(false));
+        if(!File.Exists(readme))File.WriteAllText(readme,Idas3Platform.IsAndroid?ReadmeText.Replace("this PC","this device"):ReadmeText,new UTF8Encoding(false));
     }
     internal void RefreshFolder(int context=0){if(!Busy){pickerContext=context;StartCoroutine(ScanFolder());}}
     IEnumerator ScanFolder(){
@@ -182,9 +182,7 @@ public sealed class Idas3CustomRaceMusic : MonoBehaviour
     }
     internal void AddMusic(){if(!Busy)StartCoroutine(PickAndImport());}
     IEnumerator PickAndImport(){
-        // No Windows file dialog on Android: tracks copied into the folder are
-        // imported by the folder scan.
-        if(Idas3Platform.IsAndroid){menu.SetNotice("Copy MP3, OGG or WAV files into "+FolderPath);yield break;}
+        if(Idas3Platform.IsAndroid){yield return AndroidPickAndImport();yield break;}
         SetBusy(true);menu.SetNotice("Choose an MP3, OGG or WAV file…");
         string path=null;Exception error=null;int complete=0;
         string dialogTitle=Idas3MenuLocalization.T("Add custom race music");
@@ -194,6 +192,24 @@ public sealed class Idas3CustomRaceMusic : MonoBehaviour
         if(error!=null){menu.SetNotice("The music file picker could not open.");SetBusy(false);yield break;}
         if(path==null){menu.SetNotice("");SetBusy(false);yield break;}
         try{yield return ImportCore(path,true);}finally{SetBusy(false);}
+    }
+    // Android: the document picker copies the chosen tracks into the custom
+    // music folder, then each copy goes through the normal import.
+    IEnumerator AndroidPickAndImport(){
+        SetBusy(true);
+        try{
+            menu.SetNotice("Choose MP3, OGG or WAV files…");
+            if(!Idas3AndroidFiles.Pick("audio/*;application/ogg",FolderPath,true)){menu.SetNotice("The music file picker could not open.");yield break;}
+            while(Idas3AndroidFiles.State==Idas3AndroidFiles.PickState.Picking||Idas3AndroidFiles.State==Idas3AndroidFiles.PickState.Copying){
+                if(Idas3AndroidFiles.State==Idas3AndroidFiles.PickState.Copying)menu.SetNotice("Copying music…");
+                yield return null;
+            }
+            var state=Idas3AndroidFiles.State;var paths=Idas3AndroidFiles.Results;string error=Idas3AndroidFiles.Error;
+            Idas3AndroidFiles.Reset();
+            if(state==Idas3AndroidFiles.PickState.Cancelled){menu.SetNotice("");yield break;}
+            if(state!=Idas3AndroidFiles.PickState.Done){menu.SetNotice("The music could not be copied: "+error);yield break;}
+            foreach(string path in paths)yield return ImportCore(path,true);
+        }finally{SetBusy(false);}
     }
     internal IEnumerator ImportFile(string path){
         if(Busy){Error("Wait for the music import to finish.");yield break;}

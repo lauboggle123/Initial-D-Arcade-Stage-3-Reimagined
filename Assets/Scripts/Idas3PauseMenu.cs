@@ -285,8 +285,15 @@ public sealed class Idas3PauseMenu : MonoBehaviour
         if(!controllerDevices.Select(choices[Wrap(at+Math.Sign(direction),choices.Count)].key))notice=controllerDevices.LastError??"Could not select that controller.";
     }
     private void KeepDisplay(){if(options.ConfirmDisplay())notice="OPTIONS SAVED";else notice=options.LastError??"Display change reverted.";}
+    // Desktop-only features keep their rows (navigation is by row index) but
+    // are read-only on Android: no Discord desktop app, DirectInput wheels or
+    // unfocused-window audio there.
+    private bool NotOnThisPlatform(int row)=>Idas3Platform.IsAndroid&&!hudSizesOpen&&
+        ((tab==0&&row==5)||(tab==5&&row==2)||(tab==4&&row>=3&&row<=6));
+    private static string PlatformValue(string value)=>Idas3Platform.IsAndroid?"N/A ON ANDROID":value;
     private void Adjust(int row,int direction){
         var v=options.Draft;
+        if(NotOnThisPlatform(row)){notice="Not available on Android.";return;}
         if(tab==6){
             if(row==1)v.replayTimeAttack=!v.replayTimeAttack;
             if(row==2)v.replayOnline=!v.replayOnline;
@@ -470,7 +477,7 @@ public sealed class Idas3PauseMenu : MonoBehaviour
         Text(new Rect(404,160,573,37),online?"THE BATTLE IS STILL ON":"YOUR NEXT CORNER CAN WAIT",heading);
         Text(new Rect(405,215,554,72),online?"Opening this menu does not pause either driver. Return to the road when you are ready.":"Your race is paused. Adjust your settings, check the controls, or return to the road.",wrapped);
         SummaryRow(308,"CAMERA",CameraModes[options.Current.defaultCamera]);
-        SummaryRow(370,"DISPLAY",options.Current.width+" × "+options.Current.height+"  /  "+Idas3MenuLocalization.T(DisplayModes[options.Current.displayMode]));
+        SummaryRow(370,"DISPLAY",options.Current.width+" × "+options.Current.height+(Idas3Platform.IsAndroid?"":"  /  "+Idas3MenuLocalization.T(DisplayModes[options.Current.displayMode])));
         SummaryRow(432,"AUDIO",Idas3MenuLocalization.Format("{0}% MASTER VOLUME",Mathf.RoundToInt(options.Current.masterVolume*100)));
         Text(new Rect(405,562,573,45),online?"Leaving ends your participation in this battle.":"Restarting or leaving discards the current race attempt.",wrapped);
     }
@@ -493,7 +500,7 @@ public sealed class Idas3PauseMenu : MonoBehaviour
             VolumeRow(2,"ENGINE",v.engineVolume,value=>v.engineVolume=value);
             VolumeRow(3,"TIRE SQUEAL",v.tireVolume,value=>v.tireVolume=value);
             VolumeRow(4,"EFFECTS / VOICES",v.effectsVolume,value=>v.effectsVolume=value);
-            ChoiceRow(5,"MUTE WHEN UNFOCUSED",v.muteWhenUnfocused?"ON":"OFF");
+            ChoiceRow(5,"MUTE WHEN UNFOCUSED",PlatformValue(v.muteWhenUnfocused?"ON":"OFF"));
         }else if(hudSizesOpen){
             for(int row=0;row<HudSizeGroups.Length;++row)ChoiceRow(row,HudSizeNames[row],v.HudSizePercent(HudSizeGroups[row])+"%");
         }else if(tab==7){
@@ -534,9 +541,9 @@ public sealed class Idas3PauseMenu : MonoBehaviour
         }else if(tab==5){
             ChoiceRow(0,"COMMUNITY TIMES",v.communityTimes?"ON":"OFF");
             if(Button(new Rect(282,256,692,39),"VIEW LEADERBOARDS",selection==2)){selection=2;Application.OpenURL(Idas3CommunityTimes.ServiceUrl);}
-            ChoiceRow(2,"DISCORD RICH PRESENCE",v.discordPresence?"ON":"OFF");
+            ChoiceRow(2,"DISCORD RICH PRESENCE",PlatformValue(v.discordPresence?"ON":"OFF"));
             ChoiceRow(3,"LIGHTS-OFF ADVANTAGE",v.hideLightsOffAdvantage?"HIDDEN":"VISIBLE");
-            Text(new Rect(288,436,681,48),selection==4?"Hide the numerical gap when the opponent's headlights are off in night Online/LAN battles. Day races are unaffected.":selection==3?"Shows your game activity in the Discord desktop app.":"Community Times shares race times only. Replays stay on this computer. Turning sharing off stops new submissions; posted times remain.",wrapped);
+            Text(new Rect(288,436,681,48),selection==4?"Hide the numerical gap when the opponent's headlights are off in night Online/LAN battles. Day races are unaffected.":selection==3?"Shows your game activity in the Discord desktop app.":"Community Times shares race times only. Replays stay on this "+(Idas3Platform.IsAndroid?"device":"computer")+". Turning sharing off stops new submissions; posted times remain.",wrapped);
             Text(new Rect(288,490,681,45),CommunityStatus,wrapped);
         }else if(tab==6){
             if(Button(new Rect(282,197,692,39),"OPEN REPLAY LIBRARY",selection==1))queued=Command.Replays;
@@ -552,21 +559,25 @@ public sealed class Idas3PauseMenu : MonoBehaviour
             SliderRow(1,"DEADZONE",v.SteeringDeadzone,.3f,value=>v.SteeringDeadzone=value);
             SliderRow(2,"SMOOTHING",v.steeringSmoothing,1,value=>v.steeringSmoothing=value);
             Text(new Rect(290,326,681,22),"WHEEL FORCE FEEDBACK",small);
-            ChoiceRow(3,"FORCE FEEDBACK",v.wheelForceFeedback?"ON":"OFF");
-            ChoiceRow(4,"DEVICE",WheelDeviceName(v.wheelFeedbackDevice));
-            SliderRow(5,"STRENGTH",v.wheelFeedbackStrength,1,value=>v.wheelFeedbackStrength=value);
-            ChoiceRow(6,"INVERT FORCE",v.wheelFeedbackInvert?"ON":"OFF");
+            ChoiceRow(3,"FORCE FEEDBACK",PlatformValue(v.wheelForceFeedback?"ON":"OFF"));
+            ChoiceRow(4,"DEVICE",PlatformValue(WheelDeviceName(v.wheelFeedbackDevice)));
+            // A slider writes through its own callback, past Adjust's platform guard.
+            if(Idas3Platform.IsAndroid)ChoiceRow(5,"STRENGTH",PlatformValue(""));
+            else SliderRow(5,"STRENGTH",v.wheelFeedbackStrength,1,value=>v.wheelFeedbackStrength=value);
+            ChoiceRow(6,"INVERT FORCE",PlatformValue(v.wheelFeedbackInvert?"ON":"OFF"));
             Text(new Rect(288,508,681,35),selection<=3?"Deadzone is saved separately for each response profile.":wheelFeedback?.StatusText??"Wheel feedback is unavailable.",wrapped);
         }else if(tab==8){
-            if(Button(new Rect(282,197,692,43),Updates?.ButtonLabel??"CHECK FOR UPDATES",selection==1,AttractOptions&&Updates!=null&&Updates.CanActivate)){selection=1;Updates.Activate();}
-            Text(new Rect(288,273,681,70),!AttractOptions?"Return to the title screen to check for updates.":Updates?.Message??"Update checking is unavailable.",wrapped);
+            // The in-game installer replaces Windows files; Android updates are a new APK.
+            bool updater=Idas3Platform.UpdaterEnabled;
+            if(Button(new Rect(282,197,692,43),updater?Updates?.ButtonLabel??"CHECK FOR UPDATES":"CHECK FOR UPDATES",selection==1,updater&&AttractOptions&&Updates!=null&&Updates.CanActivate)){selection=1;Updates.Activate();}
+            Text(new Rect(288,273,681,70),!updater?"On Android, install updates by downloading the new APK from the project's GitHub Releases page.":!AttractOptions?"Return to the title screen to check for updates.":Updates?.Message??"Update checking is unavailable.",wrapped);
             Text(new Rect(288,367,681,30),"INSTALLED VERSION",small);
             Text(new Rect(288,398,681,40),"v"+Application.version,label);
         }
         bool unsaved=tab==3?bindings!=null&&bindings.HasUnsavedChanges:options.HasUnsavedChanges;
         string error=tab==3?bindings?.LastError:options.LastError;
         string captureError=tab==3?bindings?.CaptureError:null;
-        string status=!string.IsNullOrEmpty(error)?error:!string.IsNullOrEmpty(captureError)?captureError:!string.IsNullOrEmpty(notice)?notice:tab==3&&!string.IsNullOrEmpty(bindings?.LastNotice)?bindings.LastNotice:unsaved?"UNSAVED CHANGES — APPLY to save; leaving settings discards changes.":"Settings are saved on this computer.";
+        string status=!string.IsNullOrEmpty(error)?error:!string.IsNullOrEmpty(captureError)?captureError:!string.IsNullOrEmpty(notice)?notice:tab==3&&!string.IsNullOrEmpty(bindings?.LastNotice)?bindings.LastNotice:unsaved?"UNSAVED CHANGES — APPLY to save; leaving settings discards changes.":(Idas3Platform.IsAndroid?"Settings are saved on this device.":"Settings are saved on this computer.");
         Text(new Rect(274,552,730,25),status,small,unsaved?Color.white:Muted);
         if(Button(new Rect(262,583,177,35),"RESET DEFAULTS",selection==Rows+1)){
             ResetDefaults();

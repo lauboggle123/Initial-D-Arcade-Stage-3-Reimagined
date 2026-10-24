@@ -31,6 +31,8 @@ The build switches Unity's active target to Android and rewrites ~1,800 texture 
 - `Assert-IdasDevice` before anything. "unauthorized" or a locked screen needs the user (Unity builds restart adb, which can re-trigger the USB-debugging prompt). `Set-IdasStayAwake` stops the phone dozing during long runs.
 - `Start-IdasGame -ClearLog`, then wait for `Get-IdasLog 'scene ready'` (ROM check + init ≈ 10–20 s on first launch) before tapping.
 - Menus: `Invoke-IdasTap Start|A|B|View|Up|Down|Left|Right [-Wait s]`. Races: `Invoke-IdasTap Pause|View|ShiftUp|ShiftDown -Mode Race`, `Invoke-IdasHold Gas 5`, `Invoke-IdasSteer 0.5 2`.
+- `Invoke-IdasHold` defaults to `-Mode Race` positions; menu holds (VIEW for Game Settings or music) need `-Mode Menu`.
+- Steering-driven menus (name entry, Game Mode) can move two steps per tap; screenshot after each move. Name entry: `Down` jumps ~16 characters, END sits two right of the space character.
 - Only one finger can be injected (`input motionevent`); writing raw multitouch to `/dev/input` is blocked by SELinux. Gas+steer together must be tested by a person.
 - `Save-IdasScreenshot <path>` and read the PNG to confirm each screen before the next input. Taps that arrive during a screen's entry animation are ignored — wait 2–3 s after a transition, then verify.
 
@@ -48,6 +50,10 @@ The build switches Unity's active target to Android and rewrites ~1,800 texture 
 - Game Mode and Transmission change with **Left/Right** (steering), not Up/Down. Transmission is a toggle and the choice is remembered.
 - Without the test environment: a hidden per-screen countdown (profile word 1176) auto-confirms the highlighted default (Game Mode defaults to Legend of the Street) if input is late, and Time Attack ends in "TIME IS UP" within ~60 s if the car is parked or crashed.
 - While the overlay is visible it owns all touches: tapping elsewhere does not confirm. IMGUI menus (pause, settings, music) hide the overlay and take direct taps; holding View on the title opens Game Settings.
+- A new driver (empty slot) goes Make → Car → Transmission → Customization → Name entry → Game Mode (seen with the AE86 defaults; cars with colour choices may add a colour step).
+- Sound Room (race music, + ADD MUSIC) opens only by holding View (`-Mode Menu`, ≥0.65 s) on **Course** select (non-Legend modes) or the Legend Rival screen; the screen shows "HOLD VIEW / MUSIC SELECT" when it is allowed. Route and Weather/Time show the original BGM hint but do not open it.
+- Settings close (×) first returns focus to the category list, then closes on a second press; BACK closes directly.
+- File picker (ROM, music): it reopens in the last folder used. Its search only covers the current folder and depends on the media index, which may lag behind `adb push`; pushing into the folder the picker already shows is more reliable. `adb shell input text` can be converted by the phone's IME (e.g. Pinyin), so keep typed text short.
 
 ## Coordinates
 

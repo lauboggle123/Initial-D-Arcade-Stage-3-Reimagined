@@ -1,6 +1,6 @@
 # Android release plan
 
-_Last updated 2026-10-21. Branch: `android-port`._
+_Last updated 2026-10-24. Branch: `android-port`._
 
 ## Context
 Releases are Windows x64 / D3D11 only. Goal: an Android build that plays smoothly on low/mid devices.
@@ -16,7 +16,8 @@ All approaches are checked against the CLAUDE.md rule: where the original author
 | 1 | Native `.so`, Android Unity build, boot on device, touch controls | **Done**, committed `f9303aaa` |
 | 2 | Test environment: hold every countdown except the race start | **Done**, committed `84c7d10c` |
 | 3 | Shader path without geometry shader; course packs on Android | **On hold.** First attempt reverted to `stash@{0}` (not resumable as-is); course packs reworked to avoid transcoding |
-| 4 | ROM import, lifecycle/saves, custom music import, phone options | **Written, not yet tested** (uncommitted, waiting for device) |
+| 4 | ROM import, lifecycle/saves, custom music import, phone options | **Device-tested 2026-10-24, all pass** (uncommitted; small wording follow-ups below) |
+| 4b | Touch controls options: layout editing, steering sensitivity, tilt | Not started (after Phase 4 is committed) |
 | 5 | Performance tiers, resolution, profiling on low/mid phones | Not started |
 | 6 | Data installer, APK updates, release packaging, docs | Not started |
 | 7 | Determinism gate, then online + leaderboard submission | Not started |
@@ -83,11 +84,42 @@ Proposed when resumed:
 - Lifecycle: `OnApplicationPause(true)` opens the pause menu in an offline race (native pause) and calls new native `Idas3SceneSaveNow` (same `saveSettings()` as shutdown). `Application.lowMemory` releases unused assets.
 - Custom music: Add music opens the picker for audio files, copies into `Custom Music`, imports each.
 - Options: Discord, wheel force feedback, mute-when-unfocused show "N/A ON ANDROID" and ignore changes; Updates tab explains APK updates; "saved on this device".
-- Deferred to later (user decision): touch steering sensitivity / tilt options.
+- Deferred to Phase 4b (user decision): touch steering sensitivity / tilt options.
 - Rule review: no conflicts found. The "a local original dump is never read or copied" comment in `Idas3Build.cs` concerns builds and release packaging; the importer copies only the file the player picks into the app's own `rom` folder at runtime, and nothing is ever bundled.
 - Note: the committed Windows `Idas3Unity.dll` lacks `Idas3SceneSaveNow`; rebuild before a Windows release.
 
 Test (device, in the Phase 2 test environment where timing matters): import ROM from Download via the picker; race, press Home mid-race and return (pause menu shown); force-close and relaunch (selection/progress kept); import a music track; check options rows.
+
+Results (2026-10-24, Red Magic 9 Pro, fresh install, test environment on):
+- ROM import: SELECT ROM FILE → picker → `gds-0033.chd` copied to `files/rom` → "verified CHD" → title. Pass.
+- Home mid-race (Akina Time Attack) and return: same process, PAUSED menu over the race; `settings.txt`/`native_selection.txt` written at the Home press, only under `userdata-unity-test`. Pass.
+- Force-close and relaunch: driver kept in slot 01 (AE86, play time, date). Pass.
+- Music: Sound Room (hold VIEW on Course select) → + ADD MUSIC → picker (audio filter; non-audio greyed) → WAV copied to `Custom Music`, imported, "Music added.", listed with duration. Cancelling the picker returns cleanly. Pass.
+- Options: desktop-only rows show N/A ON ANDROID and refuse changes; Updates tab shows the APK note with the button disabled; footer "saved on this device". Pass.
+- Flag off: no TEST ENVIRONMENT tag; real saves in `userdata-unity-scene` (fresh, 0/5), test driver stayed in `userdata-unity-test`. Real-save relaunch persistence not separately exercised (same code path as the test folder).
+
+Follow-ups found in testing (fixed on Android only; Windows text unchanged):
+- ROM screen message "Place gds-0033.chd in the rom folder." → Android says to tap SELECT ROM FILE (mapped in `Idas3RomGate`; the shared validator is untouched).
+- Pause summary DISPLAY row no longer shows the desktop window mode ("BORDERLESS").
+- Steering & Wheel STRENGTH was a live slider: its callback wrote `wheelFeedbackStrength` past `Adjust`'s platform guard. It is now an N/A row on Android.
+- Online tab and ADD MUSIC entry say "device" instead of "computer"/"PC"; the Custom Music README written on Android does too.
+- Not a bug: the settings × first returns focus to the category list (`Back()`), then closes on a second press; same on Windows.
+- Not yet reviewed on Android: the Display & Graphics tab's DISPLAY MODE / RESOLUTION rows.
+
+## Phase 4b — touch controls options (not started)
+**Why separate:** Phase 4 is written and only waiting for its device test; adding scope would delay that test and the commit. The touch overlay is independent of Phase 4's files and of the Phase 3 render path, so 4b can start once Phase 4 is committed.
+
+Scope:
+- Layout editing: move, resize and set opacity per control (race and menu layouts separately), plus reset to default. Today the layout is fixed in `Idas3TouchControls.Layout()` (`Idas3TouchControls.cs:117-154`), scaled from screen height and the safe area, and nothing is persisted.
+- Steering sensitivity (drag travel, currently `steeringTravel`) and optional tilt steering, deferred here from Phase 4.
+
+Constraints:
+- Store the layout as screen-relative values in the Unity options (`Idas3GameOptions`), never in native saves, so save formats stay unchanged. Re-clamp to the safe area when the screen size or safe area changes.
+- Keep the race HUD (tach, record panel) and chase-camera car clear, as the default layout does (Phase 1); the editor refuses or warns on placements that cover them.
+- The edit mode must work with the overlay owning all touches while visible, and stay hidden when a controller is connected, as now.
+- Device testing: `IdasDevice.ps1` computes named taps from the default layout. Either reset to the default layout in the test environment or have the helpers read the saved layout; update `SKILL.md` accordingly.
+
+Test (device): edit and save a race layout, relaunch and confirm it is kept; rotate/resize and confirm controls stay inside the safe area; reset restores the default; scripted taps still hit their controls. Repeat on a second phone with a different aspect ratio once one is available (Phase 5 hardware).
 
 ## Phase 5 — performance for low/mid devices (not started)
 - Device tiers (auto-detected, user override): Low = 30 FPS, ~60% render scale, no MSAA, mirror off; Mid = 60 FPS target, ~75% scale, MSAA 2×, mirror at reduced rate; High = native, MSAA 4×.
@@ -115,4 +147,4 @@ Test (device, in the Phase 2 test environment where timing matters): import ROM 
 - Uncommitted on `android-port`: Phase 4 changes, `CLAUDE.md`.
 - `stash@{0}` (Phase 3 attempt) exists only in the original working copy; it is not on the remote.
 - ~1,800 modified texture `.meta` files from the Android target switch: never commit.
-- Phone state: test environment flag off; old flag files removed; "stay awake on USB" enabled (`adb shell svc power stayon false` to undo). Test saves in `userdata-unity-test` hold leftover slots 02/03.
+- Phone state (2026-10-24): app reinstalled fresh; base data + all 9 course packs pushed; ROM imported via the picker; test environment flag off; "stay awake on USB" enabled (`adb shell svc power stayon false` to undo). `userdata-unity-test` holds test driver "A" in slot 01; `Custom Music` holds `idas3-test-tone.wav`.

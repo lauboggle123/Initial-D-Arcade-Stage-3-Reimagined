@@ -246,6 +246,7 @@ public sealed class Idas3SceneGame : MonoBehaviour
             pauseMenu.InitializeBindings(controlBindings);
             controllerDevices.Initialize(saves);
             if(Idas3TouchControls.Supported&&!diagnosticMode)touchControls=gameObject.AddComponent<Idas3TouchControls>();
+            Application.lowMemory-=OnLowMemory;Application.lowMemory+=OnLowMemory;
             controllerDevices.ActiveDeviceChanged += ControllerDeviceChanged;
             ControllerDeviceChanged();
             pauseMenu.InitializeControllerDevices(controllerDevices);
@@ -637,7 +638,25 @@ public sealed class Idas3SceneGame : MonoBehaviour
         wheelFeedback.Update(gameOptions.Current,controllerDevices.WheelIdentity,state,Status.car,allowed,Time.realtimeSinceStartupAsDouble);
     }
     private void OnApplicationFocus(bool focused){if(!focused)wheelFeedback?.Stop();}
-    private void OnApplicationPause(bool paused){if(paused)wheelFeedback?.Stop();}
+    private void OnApplicationPause(bool paused)
+    {
+        if(!paused)return;
+        wheelFeedback?.Stop();
+        if(!ready||stopping||failure!=null)return;
+        // Mobile: Update stops while backgrounded, so the native focus pause
+        // never runs, and the process may later be killed without a quit
+        // callback. Pause an offline race now and persist settings/profiles.
+        try{
+            if(!OnlineRace&&CanOpenPause&&!pauseMenu.IsOpen)pauseMenu.SetOpen(true);
+            if(Idas3Native.Idas3SceneSaveNow()!=1)Debug.LogWarning("Background save failed: "+Idas3Native.Error());
+        }catch(Exception error){Debug.LogWarning("Background pause/save failed: "+error.Message);}
+    }
+    private void OnLowMemory()
+    {
+        // Textures/meshes no longer referenced by the current scene can go.
+        Resources.UnloadUnusedAssets();GC.Collect();
+        Debug.LogWarning("IDAS3: low memory warning; released unused assets.");
+    }
     private void OnDisable(){wheelFeedback?.Stop();}
     private static bool NoKeyHeld(KeyCode key) => false;
 
@@ -1170,5 +1189,5 @@ public sealed class Idas3SceneGame : MonoBehaviour
         }
     }
     private void OnApplicationQuit() { StopNative(); }
-    private void OnDestroy() { StopNative(); if (instance == this) instance = null; }
+    private void OnDestroy() { Application.lowMemory -= OnLowMemory; StopNative(); if (instance == this) instance = null; }
 }

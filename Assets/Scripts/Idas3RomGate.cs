@@ -94,12 +94,15 @@ public sealed class Idas3RomGate : MonoBehaviour
                 var result = validation.GetAwaiter().GetResult();
                 Verified = result.Verified;
                 message = result.Message;
+                // The shared validator speaks of the desktop rom folder; Android players import through the picker.
+                if (Idas3Platform.IsAndroid && !Verified && message == "Place gds-0033.chd in the rom folder.") message = "No GDS-0033 dump found yet. Tap SELECT ROM FILE to import it.";
                 Debug.Log("GDS-0033 startup check: " + (Verified ? "verified " + result.Format : "blocked: " + message));
             }
             catch (Exception error) { message = "Could not verify GDS-0033. Try again."; Debug.LogWarning(error.Message); }
             validation = null;
             if (Verified) { background.enabled = false; return; }
         }
+        if (importing) { PollImport(); return; }
         var key = Keyboard.current; var pad = Gamepad.current;
         if (key?.escapeKey.wasPressedThisFrame == true || pad?.buttonEast.wasPressedThisFrame == true) { Quit(); return; }
         if (Checking) return;
@@ -109,17 +112,75 @@ public sealed class Idas3RomGate : MonoBehaviour
         if (key?.enterKey.wasPressedThisFrame == true || key?.numpadEnterKey.wasPressedThisFrame == true || pad?.buttonSouth.wasPressedThisFrame == true) Activate(Actions[selected]);
     }
 
-    // Android cannot open an app-private folder in another app; the ROM is
-    // placed there by the importer or adb, so only CHECK AGAIN and QUIT apply.
-    private static readonly int[] DesktopActions = { 0, 1, 2 }, AndroidActions = { 0, 2 };
-    private static readonly string[] ActionLabels = { "CHECK AGAIN", "OPEN ROM FOLDER", "QUIT" };
+    // Android cannot open an app-private folder in another app; the document
+    // picker copies the dump into it instead.
+    private static readonly int[] DesktopActions = { 0, 1, 2 }, AndroidActions = { 3, 0, 2 };
+    private static readonly string[] ActionLabels = { "CHECK AGAIN", "OPEN ROM FOLDER", "QUIT", "SELECT ROM FILE" };
     private static int[] Actions => Idas3Platform.IsAndroid ? AndroidActions : DesktopActions;
+    private bool importing;
 
     private void Activate(int action)
     {
         if (action == 0) CheckAgain();
         else if (action == 1) Application.OpenURL(new Uri(RomFolder + Path.DirectorySeparatorChar).AbsoluteUri);
+        else if (action == 3) StartImport();
         else Quit();
+    }
+
+    private void StartImport()
+    {
+        if (Checking || importing) return;
+        Directory.CreateDirectory(RomFolder);
+        if (!Idas3AndroidFiles.Pick("", RomFolder, true)) { message = "The file picker could not open. Try again."; return; }
+        importing = true; progress = 0; message = "Choose gds-0033.chd, or the .cue file and its three .bin tracks.";
+    }
+
+    private void PollImport()
+    {
+        var state = Idas3AndroidFiles.State;
+        if (state == Idas3AndroidFiles.PickState.Picking) return;
+        if (state == Idas3AndroidFiles.PickState.Copying)
+        {
+            long copied = Idas3AndroidFiles.CopiedBytes, total = Idas3AndroidFiles.TotalBytes;
+            progress = total > 0 ? Mathf.Clamp01((float)copied / total) : 0;
+            message = total > 0 ? string.Format("Copying ROM… {0:N0} / {1:N0} MB", copied >> 20, total >> 20) : "Copying ROM…";
+            return;
+        }
+        importing = false;
+        if (state == Idas3AndroidFiles.PickState.Done)
+        {
+            try { NormalizeImportedNames(Idas3AndroidFiles.Results); }
+            catch (Exception error) { Debug.LogWarning("ROM import naming: " + error.Message); }
+            Idas3AndroidFiles.Reset();
+            CheckAgain();
+            return;
+        }
+        message = state == Idas3AndroidFiles.PickState.Cancelled ? "No file was selected." : "The ROM could not be copied: " + Idas3AndroidFiles.Error;
+        Idas3AndroidFiles.Reset();
+    }
+
+    // The validator checks fixed names; content is still verified by hash.
+    private void NormalizeImportedNames(string[] paths)
+    {
+        var bins = new System.Collections.Generic.List<string>();
+        foreach (string path in paths)
+        {
+            string extension = Path.GetExtension(path).ToLowerInvariant();
+            if (extension == ".chd") Rename(path, "gds-0033.chd");
+            else if (extension == ".cue") Rename(path, "gds-0033.cue");
+            else if (extension == ".bin") bins.Add(path);
+        }
+        if (bins.Count != 3) return;
+        bins.Sort(StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < 3; ++i) Rename(bins[i], "gds-0033-track" + (i + 1) + ".bin");
+    }
+
+    private void Rename(string path, string name)
+    {
+        string target = Path.Combine(RomFolder, name);
+        if (string.Equals(Path.GetFullPath(path), Path.GetFullPath(target), StringComparison.Ordinal)) return;
+        if (File.Exists(target)) File.Delete(target);
+        File.Move(path, target);
     }
 
     private static void Quit()
@@ -165,14 +226,17 @@ public sealed class Idas3RomGate : MonoBehaviour
         Fill(new Rect(0, 0, 1280, 720), Color.black);
         Fill(new Rect(160, 170, 960, 380), new Color(.04f, .045f, .05f));
         Fill(new Rect(160, 170, 960, 5), new Color(.89f, .08f, .16f));
-        Idas3MenuLocalization.Label(new Rect(195, 194, 880, 54), Checking ? "CHECKING GDS-0033" : "ROM REQUIRED", titleStyle);
+        Idas3MenuLocalization.Label(new Rect(195, 194, 880, 54), importing ? "IMPORTING ROM" : Checking ? "CHECKING GDS-0033" : "ROM REQUIRED", titleStyle);
         Idas3MenuLocalization.Label(new Rect(198, 273, 875, 72), message, textStyle);
-        Idas3MenuLocalization.Label(new Rect(198, 351, 875, 62), RomFolder, pathStyle, false);
-        if (Checking)
+        // A path inside app storage means nothing to an Android player.
+        if (Idas3Platform.IsAndroid)
+            Idas3MenuLocalization.Label(new Rect(198, 351, 875, 62), "Select your own GDS-0033 dump: gds-0033.chd, or the .cue file with its three .bin tracks.", pathStyle);
+        else Idas3MenuLocalization.Label(new Rect(198, 351, 875, 62), RomFolder, pathStyle, false);
+        if (Checking || importing)
         {
             Fill(new Rect(198, 439, 875, 8), new Color(.18f, .19f, .21f));
             Fill(new Rect(198, 439, 875 * Mathf.Clamp01(progress), 8), new Color(.89f, .08f, .16f));
-            Idas3MenuLocalization.Label(new Rect(198, 470, 875, 30), "ESC / B  QUIT", pathStyle);
+            if (!importing) Idas3MenuLocalization.Label(new Rect(198, 470, 875, 30), "ESC / B  QUIT", pathStyle);
         }
         else
         {
