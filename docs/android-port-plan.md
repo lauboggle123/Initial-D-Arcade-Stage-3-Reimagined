@@ -17,7 +17,7 @@ All approaches are checked against the CLAUDE.md rule: where the original author
 | 2 | Test environment: hold every countdown except the race start | **Done**, committed `84c7d10c` |
 | 3 | Shader path without geometry shader; course packs on Android | **On hold.** First attempt reverted to `stash@{0}` (not resumable as-is); course packs reworked to avoid transcoding |
 | 4 | ROM import, lifecycle/saves, custom music import, phone options | **Device-tested 2026-10-24, all pass** (uncommitted; small wording follow-ups below) |
-| 4b | Touch controls options: layout editing, steering sensitivity, tilt | Not started (after Phase 4 is committed) |
+| 4b | Touch controls options: layout editing, steering sensitivity, tilt | **Built and device-tested 2026-10-24**; tilt direction needs a person |
 | 5 | Performance tiers, resolution, profiling on low/mid phones | Not started |
 | 6 | Data installer, APK updates, release packaging, docs | Not started |
 | 7 | Determinism gate, then online + leaderboard submission | Not started |
@@ -107,7 +107,7 @@ Follow-ups found in testing (fixed on Android only; Windows text unchanged):
 - Display & Graphics tab: DISPLAY MODE and VERTICAL SYNC are N/A on Android (always full screen; both VSync branches pace by `targetFrameRate`), and the "Turn off VSync" hint is desktop-only. RESOLUTION stays: it lowers the render resolution and is what the BALANCED/LOW presets use.
 - FRAME LIMIT = UNLIMITED ran at 31 FPS on Android: `Idas3FramePacing` set `targetFrameRate=-1`, which mobile players treat as 30. Mobile now uses the display refresh rate (measured 61 FPS on the attract screen).
 
-## Phase 4b — touch controls options (not started)
+## Phase 4b — touch controls options (built)
 **Why separate:** Phase 4 is written and only waiting for its device test; adding scope would delay that test and the commit. The touch overlay is independent of Phase 4's files and of the Phase 3 render path, so 4b can start once Phase 4 is committed.
 
 Scope:
@@ -121,6 +121,15 @@ Constraints:
 - Device testing: `IdasDevice.ps1` computes named taps from the default layout. Either reset to the default layout in the test environment or have the helpers read the saved layout; update `SKILL.md` accordingly.
 
 Test (device): edit and save a race layout, relaunch and confirm it is kept; rotate/resize and confirm controls stay inside the safe area; reset restores the default; scripted taps still hit their controls. Repeat on a second phone with a different aspect ratio once one is available (Phase 5 hardware).
+
+As built:
+- Steering & Wheel tab on Android: the wheel force feedback rows are replaced by TOUCH STEERING (DRAG / TILT PHONE), FULL LOCK (drag 6–30% of screen height, default 15; tilt 10–60°, default 30) and EDIT TOUCH LAYOUT.
+- `Idas3TouchControls` editor (pause menu hidden meanwhile): RACE / MENU layouts, drag to move, SIZE ± (50–200%), FADE ± (20–100%), RESET, RESET ALL, CANCEL, SAVE. Yellow boxes mark the default record panel, tachometer and car; warnings for covering them and for overlapping controls. Saves through `Idas3GameOptions.ApplyTouchLayout` (own transaction, like the HUD editor).
+- Overlapping controls: a touch goes to the nearest centre (was first in list order, which let a moved A swallow VIEW).
+- Tilt: roll from gravity, light smoothing; the drag zone is off and the track shows TILT TO STEER.
+- `IdasDevice.ps1` `Get-IdasPoint`/`Invoke-IdasSteer` read the saved layout and full lock from the active save folder (edge clamping not mirrored).
+
+Results (2026-10-24, test environment): new rows and defaults shown; drag moved A; SIZE+ ×2 / FADE− saved as 120% / 80%; layout kept after relaunch; scripted `Invoke-IdasTap A` hit the moved button; overlap and HUD-cover warnings shown; RESET ALL + SAVE restored defaults; TILT PHONE / 35° applied and the race shows TILT TO STEER. Not verifiable by script: tilt direction and feel (adb cannot drive the accelerometer); the LandscapeLeft/Right sign is untested.
 
 ## Phase 5 — performance for low/mid devices (not started)
 - Device tiers (auto-detected, user override): Low = 30 FPS, ~60% render scale, no MSAA, mirror off; Mid = 60 FPS target, ~75% scale, MSAA 2×, mirror at reduced rate; High = native, MSAA 4×.

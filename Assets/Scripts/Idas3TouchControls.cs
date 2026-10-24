@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -11,33 +12,57 @@ public sealed class Idas3TouchControls : MonoBehaviour
     const ushort DpadUp = 0x0001, DpadDown = 0x0002, DpadLeft = 0x0004, DpadRight = 0x0008;
     const ushort Start = 0x0010, A = 0x1000, B = 0x2000, X = 0x4000, Y = 0x8000;
     enum Control { None, Up, Down, Left, Right, Confirm, Back, View, Pause, Steer, Gas, Brake, ShiftUp, ShiftDown }
-    struct Button { public Control control; public Rect rect; public string label; public bool round; }
+    struct Button { public Control control; public Rect rect; public string label; public bool round; public int slot; }
+
+    // Layout slots saved in Idas3GameOptions.Values.touch*: race 0-5, menu 6-10. The D-pad is one slot.
+    const int SlotCount = Idas3GameOptions.Values.TouchControlCount;
+    static readonly string[] SlotNames = { "PAUSE", "VIEW", "GAS", "BRAKE", "SHIFT UP", "SHIFT DOWN", "START", "D-PAD", "A", "B", "VIEW" };
 
     static Idas3TouchControls active;
-    // True while the overlay is on screen; the host ignores mouse emulation then.
-    internal static bool OwnsPointer => active != null && active.Visible;
+    internal static Idas3TouchControls Instance => active;
+    // True while the overlay or its editor is on screen; the host ignores mouse emulation then.
+    internal static bool OwnsPointer => active != null && (active.Visible || active.editing);
     internal static bool FreeMouseHeld => !OwnsPointer && Input.GetMouseButton(0);
-    public static bool Supported => Idas3Platform.IsAndroid || System.Array.IndexOf(System.Environment.GetCommandLineArgs(), "-idas3-touch") >= 0;
+    public static bool Supported => Idas3Platform.IsAndroid || Array.IndexOf(Environment.GetCommandLineArgs(), "-idas3-touch") >= 0;
 
     public bool Visible { get; private set; }
     public bool Driving { get; private set; }
-    // Full steering lock at this many screen-height percent of horizontal drag.
-    public float steeringTravel = 15f;
+    public bool Editing => editing;
 
     readonly Dictionary<int, Control> fingers = new Dictionary<int, Control>();
     readonly List<Button> buttons = new List<Button>();
     readonly HashSet<Control> held = new HashSet<Control>();
+    readonly Rect[] slotHome = new Rect[SlotCount], slotRect = new Rect[SlotCount];
+    Idas3GameOptions.Values settings = new Idas3GameOptions.Values();
     int steerFinger = -1;
     Vector2 steerAnchor, steerPoint;
     float steering;
     Texture2D disk, ring;
-    GUIStyle labelStyle;
+    GUIStyle labelStyle, toolStyle;
     int layoutWidth, layoutHeight;
     Rect layoutSafe, steerZone;
-    bool layoutDriving;
+    bool layoutDriving, layoutDirty = true;
+
+    // Editor state: a working copy of the options, committed only by SAVE.
+    bool editing, editDriving, dragging;
+    Idas3GameOptions editOwner;
+    Idas3GameOptions.Values working;
+    Action<bool> editClosed;
+    int selectedSlot;
+    string editNotice = "";
+
+    Idas3GameOptions.Values Layout => editing ? working : settings;
+    bool Tilt => settings.touchTilt && !editing;
+    float Travel => settings.touchSteeringTravel * Screen.height / 100f;
 
     void Awake() { active = this; }
     void OnDestroy() { if (active == this) active = null; if (disk != null) Destroy(disk); if (ring != null) Destroy(ring); }
+
+    public void Configure(Idas3GameOptions.Values values)
+    {
+        if (values == null) return;
+        settings = values.Clone(); layoutDirty = true;
+    }
 
     // Called once per host frame before the pad sample is used.
     public void Tick(bool show, bool driving)
@@ -45,7 +70,7 @@ public sealed class Idas3TouchControls : MonoBehaviour
         if (!show) { Release(); Visible = false; return; }
         if (!Visible || driving != Driving) Release();
         Visible = true; Driving = driving;
-        Layout();
+        RebuildLayout();
         for (int i = 0; i < Input.touchCount; ++i)
         {
             var touch = Input.GetTouch(i);
@@ -67,7 +92,7 @@ public sealed class Idas3TouchControls : MonoBehaviour
                 steerPoint = point;
                 // Floating stick: past full lock the anchor follows the finger,
                 // so reversing direction responds immediately.
-                float travel = steeringTravel * Screen.height / 100f;
+                float travel = Travel;
                 float offset = steerPoint.x - steerAnchor.x;
                 if (offset > travel) steerAnchor.x = steerPoint.x - travel;
                 else if (offset < -travel) steerAnchor.x = steerPoint.x + travel;
@@ -77,7 +102,19 @@ public sealed class Idas3TouchControls : MonoBehaviour
         if (Input.touchCount == 0) { fingers.Clear(); steerFinger = -1; }
         held.Clear();
         foreach (var control in fingers.Values) held.Add(control);
-        steering = steerFinger < 0 ? 0 : Mathf.Clamp((steerPoint.x - steerAnchor.x) / (steeringTravel * Screen.height / 100f), -1, 1);
+        if (Driving && Tilt) steering = Mathf.Lerp(steering, TiltSteering(), 1 - Mathf.Exp(-Time.unscaledDeltaTime * 15));
+        else steering = steerFinger < 0 ? 0 : Mathf.Clamp((steerPoint.x - steerAnchor.x) / Travel, -1, 1);
+    }
+
+    // Roll of the phone in the screen plane, from gravity: tilting it clockwise
+    // like a wheel steers right. LandscapeLeft has the phone's top edge on the left.
+    float TiltSteering()
+    {
+        var g = Input.acceleration;
+        bool right = Screen.orientation == ScreenOrientation.LandscapeRight;
+        float lateral = right ? g.y : -g.y, down = right ? g.x : -g.x;
+        if (lateral * lateral + down * down < .04f) return 0; // Phone lying flat: no usable roll.
+        return Mathf.Clamp(Mathf.Atan2(lateral, down) * Mathf.Rad2Deg / settings.touchTiltDegrees, -1, 1);
     }
 
     void Release() { fingers.Clear(); held.Clear(); steerFinger = -1; steering = 0; }
@@ -100,100 +137,287 @@ public sealed class Idas3TouchControls : MonoBehaviour
         pad.buttons |= bits;
         if (held.Contains(Control.Gas)) pad.rightTrigger = 255;
         if (held.Contains(Control.Brake)) pad.leftTrigger = 255;
-        if (steerFinger >= 0) pad.thumbLX = (short)Mathf.RoundToInt(steering * (steering < 0 ? 32768f : 32767f));
+        if (steerFinger >= 0 || Driving && Tilt) pad.thumbLX = (short)Mathf.RoundToInt(steering * (steering < 0 ? 32768f : 32767f));
     }
 
+    // Overlapping (moved or enlarged) controls: the touch goes to the nearest centre.
     Control HitTest(Vector2 point)
     {
-        float slop = Screen.height * .02f;
+        float slop = Screen.height * .02f, best = float.MaxValue;
+        var hit = Control.None;
         foreach (var button in buttons)
         {
             var area = new Rect(button.rect.x - slop, button.rect.y - slop, button.rect.width + 2 * slop, button.rect.height + 2 * slop);
-            if (area.Contains(point)) return button.control;
+            float distance = (point - button.rect.center).sqrMagnitude;
+            if (area.Contains(point) && distance < best) { best = distance; hit = button.control; }
         }
-        return Driving && steerZone.Contains(point) ? Control.Steer : Control.None;
+        if (hit != Control.None) return hit;
+        return Driving && !Tilt && steerZone.Contains(point) ? Control.Steer : Control.None;
     }
 
-    void Layout()
+    static Rect SafeRect()
     {
         var safe = Screen.safeArea;
-        var guiSafe = new Rect(safe.x, Screen.height - safe.yMax, safe.width, safe.height);
-        if (layoutWidth == Screen.width && layoutHeight == Screen.height && layoutSafe == guiSafe && layoutDriving == Driving) return;
-        layoutWidth = Screen.width; layoutHeight = Screen.height; layoutSafe = guiSafe; layoutDriving = Driving;
+        return safe.width > 0 && safe.height > 0 ? new Rect(safe.x, Screen.height - safe.yMax, safe.width, safe.height) : new Rect(0, 0, Screen.width, Screen.height);
+    }
+
+    void RebuildLayout()
+    {
+        var guiSafe = SafeRect();
+        bool driving = editing ? editDriving : Driving;
+        if (!layoutDirty && layoutWidth == Screen.width && layoutHeight == Screen.height && layoutSafe == guiSafe && layoutDriving == driving) return;
+        layoutDirty = false; layoutWidth = Screen.width; layoutHeight = Screen.height; layoutSafe = guiSafe; layoutDriving = driving;
         buttons.Clear();
         float u = Screen.height / 100f;
         float left = guiSafe.xMin + 3 * u, right = guiSafe.xMax - 3 * u, top = guiSafe.yMin + 3 * u, bottom = guiSafe.yMax - 3 * u;
-        if (Driving)
+        if (driving)
         {
             // Keep clear of the default race HUD: the record panel (top right,
             // to ~41% height) and the tachometer (bottom right, ~42u wide).
-            Add(Control.Pause, new Rect(right - 17 * u, guiSafe.yMin + 43 * u, 17 * u, 9 * u), "PAUSE", false);
-            Add(Control.View, new Rect(right - 17 * u, guiSafe.yMin + 54 * u, 17 * u, 9 * u), "VIEW", false);
+            Add(Control.Pause, Place(0, new Rect(right - 17 * u, guiSafe.yMin + 43 * u, 17 * u, 9 * u), guiSafe), "PAUSE", false, 0);
+            Add(Control.View, Place(1, new Rect(right - 17 * u, guiSafe.yMin + 54 * u, 17 * u, 9 * u), guiSafe), "VIEW", false, 1);
             // Pedals sit just left of the tachometer so chase cameras keep the
             // player's car (centre bottom) visible.
             var gas = new Rect(right - 48 * u, bottom - 40 * u, 17 * u, 40 * u);
             var brake = new Rect(gas.x - 18 * u, bottom - 28 * u, 15 * u, 28 * u);
-            Add(Control.Gas, gas, "GAS", false);
-            Add(Control.Brake, brake, "BRAKE", false);
-            Add(Control.ShiftUp, new Rect(gas.x + 2 * u, gas.y - 15 * u, 13 * u, 13 * u), "▲", true);
-            Add(Control.ShiftDown, new Rect(brake.x + 1 * u, brake.y - 15 * u, 13 * u, 13 * u), "▼", true);
-            steerZone = new Rect(guiSafe.xMin, guiSafe.yMin + 16 * u, Mathf.Min(guiSafe.width * .5f, brake.x - 8 * u - guiSafe.xMin), guiSafe.height - 16 * u);
+            var placedBrake = Place(3, brake, guiSafe);
+            Add(Control.Gas, Place(2, gas, guiSafe), "GAS", false, 2);
+            Add(Control.Brake, placedBrake, "BRAKE", false, 3);
+            Add(Control.ShiftUp, Place(4, new Rect(gas.x + 2 * u, gas.y - 15 * u, 13 * u, 13 * u), guiSafe), "▲", true, 4);
+            Add(Control.ShiftDown, Place(5, new Rect(brake.x + 1 * u, brake.y - 15 * u, 13 * u, 13 * u), guiSafe), "▼", true, 5);
+            // Buttons hit-test before the zone, so one moved into it still wins.
+            float reach = placedBrake.x - 8 * u - guiSafe.xMin;
+            steerZone = new Rect(guiSafe.xMin, guiSafe.yMin + 16 * u, reach >= 25 * u ? Mathf.Min(guiSafe.width * .5f, reach) : guiSafe.width * .5f, guiSafe.height - 16 * u);
         }
         else
         {
-            Add(Control.Pause, new Rect(right - 20 * u, top, 20 * u, 10 * u), "START", false);
+            Add(Control.Pause, Place(6, new Rect(right - 20 * u, top, 20 * u, 10 * u), guiSafe), "START", false, 6);
             float size = 13 * u;
             var center = new Vector2(left + 1.5f * size, bottom - 1.5f * size);
-            Add(Control.Up, new Rect(center.x - size / 2, center.y - 1.5f * size, size, size), "▲", false);
-            Add(Control.Down, new Rect(center.x - size / 2, center.y + .5f * size, size, size), "▼", false);
-            Add(Control.Left, new Rect(center.x - 1.5f * size, center.y - size / 2, size, size), "◀", false);
-            Add(Control.Right, new Rect(center.x + .5f * size, center.y - size / 2, size, size), "▶", false);
-            Add(Control.Confirm, new Rect(right - 19 * u, bottom - 25 * u, 19 * u, 19 * u), "A", true);
-            Add(Control.Back, new Rect(right - 39 * u, bottom - 15 * u, 15 * u, 15 * u), "B", true);
-            Add(Control.View, new Rect(right - 39 * u, bottom - 35 * u, 15 * u, 15 * u), "VIEW", true);
+            var pad = Place(7, new Rect(center.x - 1.5f * size, center.y - 1.5f * size, 3 * size, 3 * size), guiSafe);
+            size = pad.width / 3; center = pad.center;
+            Add(Control.Up, new Rect(center.x - size / 2, center.y - 1.5f * size, size, size), "▲", false, 7);
+            Add(Control.Down, new Rect(center.x - size / 2, center.y + .5f * size, size, size), "▼", false, 7);
+            Add(Control.Left, new Rect(center.x - 1.5f * size, center.y - size / 2, size, size), "◀", false, 7);
+            Add(Control.Right, new Rect(center.x + .5f * size, center.y - size / 2, size, size), "▶", false, 7);
+            Add(Control.Confirm, Place(8, new Rect(right - 19 * u, bottom - 25 * u, 19 * u, 19 * u), guiSafe), "A", true, 8);
+            Add(Control.Back, Place(9, new Rect(right - 39 * u, bottom - 15 * u, 15 * u, 15 * u), guiSafe), "B", true, 9);
+            Add(Control.View, Place(10, new Rect(right - 39 * u, bottom - 35 * u, 15 * u, 15 * u), guiSafe), "VIEW", true, 10);
             steerZone = Rect.zero;
         }
     }
-    void Add(Control control, Rect rect, string label, bool round) => buttons.Add(new Button { control = control, rect = rect, label = label, round = round });
+
+    // Saved offset and size around the default centre, kept wholly inside the safe area.
+    Rect Place(int slot, Rect home, Rect bounds)
+    {
+        var layout = Layout;
+        var size = home.size * (layout.TouchSizePercent(slot) / 100f);
+        size = new Vector2(Mathf.Min(size.x, bounds.width), Mathf.Min(size.y, bounds.height));
+        var center = home.center + layout.TouchOffset(slot) * Screen.height;
+        var rect = new Rect(center - size / 2, size);
+        rect.x = Mathf.Clamp(rect.x, bounds.xMin, bounds.xMax - rect.width);
+        rect.y = Mathf.Clamp(rect.y, bounds.yMin, bounds.yMax - rect.height);
+        slotHome[slot] = home; slotRect[slot] = rect;
+        return rect;
+    }
+    void Add(Control control, Rect rect, string label, bool round, int slot) => buttons.Add(new Button { control = control, rect = rect, label = label, round = round, slot = slot });
+
+    // ---- Layout editor (opened from Game Settings; the pause menu stays hidden meanwhile) ----
+
+    public void BeginEdit(Idas3GameOptions owner, bool driving, Action<bool> closed)
+    {
+        if (editing || owner == null) return;
+        Release(); editOwner = owner; working = owner.Current.Clone(); editClosed = closed;
+        editing = true; editDriving = driving; dragging = false; editNotice = "";
+        selectedSlot = driving ? 2 : 8; layoutDirty = true;
+    }
+
+    public void EndEdit(bool save)
+    {
+        if (!editing) return;
+        if (save && !editOwner.ApplyTouchLayout(working)) { editNotice = editOwner.LastError ?? "Could not save the touch layout."; return; }
+        editing = false; dragging = false; layoutDirty = true;
+        var closed = editClosed; editClosed = null; editOwner = null; working = null;
+        closed?.Invoke(save);
+    }
+
+    void ShowEditLayout(bool driving)
+    {
+        if (editDriving == driving) return;
+        editDriving = driving; dragging = false; selectedSlot = driving ? 2 : 8; layoutDirty = true;
+    }
+
+    void MoveSelected(Vector2 delta)
+    {
+        int slot = selectedSlot;
+        working.touchPositions[slot] = (slotRect[slot].center + delta - slotHome[slot].center) / Screen.height;
+        SyncSelected();
+    }
+
+    // Re-derive the stored offset from the clamped rectangle so a control
+    // pinned at an edge never carries an offset that keeps it stuck there.
+    void SyncSelected()
+    {
+        layoutDirty = true; RebuildLayout();
+        int slot = selectedSlot;
+        working.touchPositions[slot] = (slotRect[slot].center - slotHome[slot].center) / Screen.height;
+        layoutDirty = true; RebuildLayout();
+    }
+
+    void StepSelected(int[] values, int fallback, int step, int minimum, int maximum)
+    {
+        int now = values[selectedSlot] == 0 ? fallback : values[selectedSlot];
+        int next = Mathf.Clamp(now + step, minimum, maximum);
+        values[selectedSlot] = next == fallback ? 0 : next;
+        SyncSelected();
+    }
+
+    void ResetSlot(int slot) { working.touchPositions[slot] = Vector2.zero; working.touchSizePercent[slot] = 0; working.touchOpacityPercent[slot] = 0; }
+
+    // Approximate areas of the default race HUD and the chase-camera car.
+    static Rect[] KeepOut(Rect safe, float u) => new[] {
+        new Rect(safe.xMax - 38 * u, safe.yMin, 38 * u, 41 * u),
+        new Rect(safe.xMax - 44 * u, safe.yMax - 36 * u, 44 * u, 36 * u),
+        new Rect(safe.center.x - 18 * u, safe.yMin + 50 * u, 36 * u, 34 * u) };
+
+    void DrawEditor()
+    {
+        float u = Screen.height / 100f;
+        var safe = SafeRect();
+        var e = Event.current;
+        float toolWidth = Mathf.Min(150 * u, Screen.width - 50 * u), row = 9 * u, gap = u;
+        var tools = new Rect(safe.center.x - toolWidth / 2, safe.yMin + 2 * u, toolWidth, 2 * row + 3 * gap);
+        toolStyle.fontSize = Mathf.RoundToInt(3.2f * u);
+
+        if (e.type == EventType.Repaint)
+        {
+            GUI.color = new Color(0, 0, 0, .45f);
+            GUI.DrawTexture(new Rect(0, 0, Screen.width, Screen.height), Texture2D.whiteTexture);
+        }
+        // Overlaps still work (nearest centre wins) but leave less room for each control.
+        bool overlaps = false, covers = false;
+        for (int i = 0; i < buttons.Count; ++i)
+            for (int j = i + 1; j < buttons.Count; ++j)
+                if (buttons[i].slot != buttons[j].slot && buttons[i].rect.Overlaps(buttons[j].rect)) overlaps = true;
+        if (editDriving)
+        {
+            foreach (var zone in KeepOut(safe, u))
+            {
+                foreach (var button in buttons) if (button.rect.Overlaps(zone)) covers = true;
+                if (e.type != EventType.Repaint) continue;
+                GUI.color = new Color(1, .85f, .2f, .14f); GUI.DrawTexture(zone, Texture2D.whiteTexture);
+                GUI.color = new Color(1, .85f, .2f, .5f); Outline(zone, Mathf.Max(1f, .2f * u));
+            }
+        }
+        if (e.type == EventType.Repaint) DrawButtons(true);
+
+        // Toolbar first: its buttons win over a control lying underneath.
+        if (e.type == EventType.Repaint) { GUI.color = new Color(.07f, .08f, .1f, .92f); GUI.DrawTexture(tools, Texture2D.whiteTexture); }
+        GUI.color = Color.white;
+        float x = tools.x + gap, y = tools.y + gap, w = (toolWidth - 6 * gap) / 5;
+        if (Tool(new Rect(x, y, w, row), "RACE", editDriving)) ShowEditLayout(true);
+        if (Tool(new Rect(x + (w + gap), y, w, row), "MENU", !editDriving)) ShowEditLayout(false);
+        if (Tool(new Rect(x + 2 * (w + gap), y, w, row), "RESET ALL")) { for (int i = 0; i < SlotCount; ++i) ResetSlot(i); layoutDirty = true; editNotice = ""; }
+        if (Tool(new Rect(x + 3 * (w + gap), y, w, row), "CANCEL")) { EndEdit(false); return; }
+        if (Tool(new Rect(x + 4 * (w + gap), y, w, row), "SAVE", true)) { EndEdit(true); if (!editing) return; }
+        y += row + gap; w = (toolWidth - 7 * gap) / 6;
+        GUI.Label(new Rect(x, y, w, row), SlotNames[selectedSlot], toolStyle);
+        if (Tool(new Rect(x + (w + gap), y, w, row), "SIZE −")) StepSelected(working.touchSizePercent, 100, -10, 50, 200);
+        if (Tool(new Rect(x + 2 * (w + gap), y, w, row), "SIZE +")) StepSelected(working.touchSizePercent, 100, 10, 50, 200);
+        if (Tool(new Rect(x + 3 * (w + gap), y, w, row), "FADE −")) StepSelected(working.touchOpacityPercent, 100, -20, 20, 100);
+        if (Tool(new Rect(x + 4 * (w + gap), y, w, row), "FADE +")) StepSelected(working.touchOpacityPercent, 100, 20, 20, 100);
+        if (Tool(new Rect(x + 5 * (w + gap), y, w, row), "RESET")) { ResetSlot(selectedSlot); SyncSelected(); }
+
+        bool warning = editNotice.Length == 0 && (overlaps || covers);
+        string status = editNotice.Length > 0 ? editNotice : overlaps ? "Two controls overlap: a tap there presses the nearer one." :
+            covers ? "A control covers part of the default race HUD or the car." : "Drag a control to move it. SIZE and FADE change the selected one.";
+        var statusRect = new Rect(safe.center.x - toolWidth / 2, tools.yMax + gap, toolWidth, 6 * u);
+        if (e.type == EventType.Repaint) { GUI.color = new Color(0, 0, 0, .6f); GUI.DrawTexture(statusRect, Texture2D.whiteTexture); }
+        GUI.color = warning ? new Color(1, .85f, .2f) : Color.white;
+        int toolFont = toolStyle.fontSize; toolStyle.fontSize = Mathf.RoundToInt(2.6f * u);
+        GUI.Label(statusRect, status, toolStyle);
+        toolStyle.fontSize = toolFont;
+        GUI.color = Color.white;
+
+        // Dragging: IMGUI receives the first touch as the mouse on Android.
+        if (e.type == EventType.MouseDown && !tools.Contains(e.mousePosition) && !statusRect.Contains(e.mousePosition))
+        {
+            float best = float.MaxValue;
+            foreach (var button in buttons)
+            {
+                float distance = (e.mousePosition - button.rect.center).sqrMagnitude;
+                if (button.rect.Contains(e.mousePosition) && distance < best) { best = distance; selectedSlot = button.slot; dragging = true; }
+            }
+            if (dragging) { editNotice = ""; e.Use(); }
+        }
+        else if (e.type == EventType.MouseDrag && dragging) { MoveSelected(e.delta); e.Use(); }
+        else if (e.type == EventType.MouseUp && dragging) { dragging = false; e.Use(); }
+    }
+
+    bool Tool(Rect rect, string text, bool active = false)
+    {
+        if (Event.current.type == EventType.Repaint)
+        {
+            GUI.color = active ? new Color(.87f, .14f, .19f, .95f) : new Color(.16f, .17f, .2f, .95f);
+            GUI.DrawTexture(rect, Texture2D.whiteTexture);
+            GUI.color = new Color(1, 1, 1, .35f); Outline(rect, 1);
+            GUI.color = Color.white; GUI.Label(rect, text, toolStyle);
+        }
+        return GUI.Button(rect, GUIContent.none, GUIStyle.none);
+    }
 
     void OnGUI()
     {
-        if (!Visible || Event.current.type != EventType.Repaint) return;
+        if (!Visible && !editing) return;
+        if (!editing && Event.current.type != EventType.Repaint) return;
         GUI.depth = -100;
         if (disk == null) disk = CreateDisk(128, 0);
         if (ring == null) ring = CreateDisk(128, 5);
         if (labelStyle == null) labelStyle = new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold };
+        if (toolStyle == null) toolStyle = new GUIStyle(labelStyle) { wordWrap = true };
         labelStyle.fontSize = Mathf.RoundToInt(Screen.height * .035f);
         var old = GUI.color;
-        // Dark fill + light outline stays readable on white logos and night roads.
-        float line = Mathf.Max(2f, Screen.height * .003f);
-        foreach (var button in buttons)
-        {
-            bool down = held.Contains(button.control);
-            GUI.color = down ? new Color(.9f, .1f, .16f, .6f) : new Color(0, 0, 0, .32f);
-            GUI.DrawTexture(button.rect, button.round ? disk : Texture2D.whiteTexture);
-            GUI.color = new Color(1, 1, 1, down ? .9f : .55f);
-            if (button.round) GUI.DrawTexture(button.rect, ring);
-            else Outline(button.rect, line);
-            Label(button.rect, button.label, down ? 1f : .85f);
-        }
+        if (editing) { RebuildLayout(); DrawEditor(); GUI.color = old; return; }
+        DrawButtons(false);
         if (Driving)
         {
-            float travel = steeringTravel * Screen.height / 100f, knob = Screen.height * .09f;
+            float line = Mathf.Max(2f, Screen.height * .003f);
+            float travel = Travel, knob = Screen.height * .09f;
             var anchor = steerFinger >= 0 ? steerAnchor : new Vector2(steerZone.center.x, steerZone.yMax - 2.2f * travel);
+            if (Tilt) { travel = Screen.height * .15f; anchor = new Vector2(steerZone.center.x, steerZone.yMax - 2.2f * travel); }
             var track = new Rect(anchor.x - travel - knob / 2, anchor.y - knob * .3f, 2 * travel + knob, knob * .6f);
             GUI.color = new Color(0, 0, 0, .3f);
             GUI.DrawTexture(track, Texture2D.whiteTexture);
             GUI.color = new Color(1, 1, 1, .45f);
             Outline(track, line);
             var knobRect = new Rect(anchor.x + steering * travel - knob / 2, anchor.y - knob / 2, knob, knob);
-            GUI.color = steerFinger >= 0 ? new Color(.9f, .1f, .16f, .65f) : new Color(0, 0, 0, .35f);
+            GUI.color = steerFinger >= 0 || Tilt ? new Color(.9f, .1f, .16f, .65f) : new Color(0, 0, 0, .35f);
             GUI.DrawTexture(knobRect, disk);
             GUI.color = new Color(1, 1, 1, .8f);
             GUI.DrawTexture(knobRect, ring);
-            if (steerFinger < 0) Label(new Rect(anchor.x - travel, anchor.y + knob * .6f, 2 * travel, knob * .6f), "◀  STEER  ▶", .85f);
+            if (Tilt) Label(new Rect(anchor.x - travel, anchor.y + knob * .6f, 2 * travel, knob * .6f), "TILT TO STEER", .85f);
+            else if (steerFinger < 0) Label(new Rect(anchor.x - travel, anchor.y + knob * .6f, 2 * travel, knob * .6f), "◀  STEER  ▶", .85f);
         }
         GUI.color = old;
+    }
+
+    void DrawButtons(bool editor)
+    {
+        // Dark fill + light outline stays readable on white logos and night roads.
+        float line = Mathf.Max(2f, Screen.height * .003f);
+        foreach (var button in buttons)
+        {
+            bool down = held.Contains(button.control);
+            float alpha = Layout.TouchOpacityPercent(button.slot) / 100f;
+            GUI.color = down ? new Color(.9f, .1f, .16f, .6f * alpha) : new Color(0, 0, 0, .32f * alpha);
+            GUI.DrawTexture(button.rect, button.round ? disk : Texture2D.whiteTexture);
+            bool selected = editor && button.slot == selectedSlot;
+            GUI.color = selected ? new Color(.95f, .15f, .2f, 1) : new Color(1, 1, 1, (down ? .9f : .55f) * alpha);
+            if (button.round) GUI.DrawTexture(button.rect, ring);
+            else Outline(button.rect, selected ? 2.5f * line : line);
+            if (selected && button.round) Outline(button.rect, line);
+            Label(button.rect, button.label, (down ? 1f : .85f) * Mathf.Max(alpha, editor ? .6f : 0));
+        }
     }
 
     static void Outline(Rect r, float w)

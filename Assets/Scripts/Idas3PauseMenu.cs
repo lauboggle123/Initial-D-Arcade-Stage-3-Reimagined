@@ -73,6 +73,12 @@ public sealed class Idas3PauseMenu : MonoBehaviour
         HudEditor.Open(options,this,initial,(saved,layout)=>{blockThroughFrame=Time.frameCount+1;onClosed?.Invoke(saved,layout);},initialGroup);
     }
     internal void OpenHudCustomization(){if(EditingHud)return;if(HudCustomization==null)HudCustomization=gameObject.AddComponent<Idas3HudCustomization>();HudCustomization.Open(options,this);}
+    internal bool EditingTouch=>Idas3TouchControls.Instance!=null&&Idas3TouchControls.Instance.Editing;
+    private void OpenTouchEditor(){
+        var touch=Idas3TouchControls.Instance;
+        if(touch==null){notice="Touch controls are not active.";return;}
+        touch.BeginEdit(options,!AttractOptions,saved=>{blockThroughFrame=Time.frameCount+1;notice=saved?"TOUCH LAYOUT SAVED":"";});
+    }
     internal void HudCustomizationClosed(bool saved){blockThroughFrame=Time.frameCount+1;notice=saved?"HUD CUSTOMIZATION SAVED":"";}
     public bool FullTuneAvailable {get;set;}
     public bool DiagnosticCaptureReady {get;private set;}
@@ -113,6 +119,7 @@ public sealed class Idas3PauseMenu : MonoBehaviour
         }else{
             if(CustomizingHud)HudCustomization.Close(false);
             if(HudEditor!=null&&HudEditor.IsOpen)HudEditor.Close(false);
+            if(EditingTouch)Idas3TouchControls.Instance.EndEdit(false);
             // Returning to driving must preserve a held pedal or steering axis.
             // The host separately guards the closing menu button against reuse.
             options?.RevertDisplay();bindings?.CancelCapture();bindings?.CancelEdit(false);pending=Command.None;
@@ -133,6 +140,7 @@ public sealed class Idas3PauseMenu : MonoBehaviour
         if(tab==4)wheelFeedback?.RefreshDevices();
     }
     public void Navigate(int delta){
+        if(EditingTouch)return;
         if(EditingLayout){HudEditor.Navigate(delta);return;}
         if(CustomizingHud){HudCustomization.Navigate(delta);return;}
         if(EditingHud)return;
@@ -144,6 +152,7 @@ public sealed class Idas3PauseMenu : MonoBehaviour
         selection=showOptions?1+Wrap(selection-1+Math.Sign(delta),Rows+3):Wrap(selection+Math.Sign(delta),online?4:5);
     }
     public void NavigateHorizontal(int delta){
+        if(EditingTouch)return;
         if(EditingLayout){HudEditor.NavigateHorizontal(delta,wheelNavigation);return;}
         if(CustomizingHud){if(wheelNavigation)HudCustomization.Navigate(delta);else HudCustomization.NavigateHorizontal(delta);return;}
         if(EditingHud)return;
@@ -156,6 +165,7 @@ public sealed class Idas3PauseMenu : MonoBehaviour
         if(selection<=Rows){if(tab==3){if(DeviceRowSelected)ChangeControllerDevice(Math.Sign(delta));else bindingColumn=Wrap(bindingColumn+Math.Sign(delta),4);}else Adjust(selection-1,Math.Sign(delta));}
     }
     public void Activate(){
+        if(EditingTouch)return;
         if(EditingLayout){HudEditor.Activate();return;}
         if(CustomizingHud){HudCustomization.Activate();return;}
         if(EditingHud)return;
@@ -183,6 +193,7 @@ public sealed class Idas3PauseMenu : MonoBehaviour
         else if(selection==Rows+2)Apply();else Back();
     }
     public void Back(){
+        if(EditingTouch){Idas3TouchControls.Instance.EndEdit(false);return;}
         if(EditingLayout){HudEditor.Back();return;}
         if(CustomizingHud){HudCustomization.Back();return;}
         if(EditingHud){HudEditor.Close(false);return;}
@@ -208,7 +219,7 @@ public sealed class Idas3PauseMenu : MonoBehaviour
     private bool Modal=>bindingChoice||pending!=Command.None||options.DisplayConfirmationPending||(bindings!=null&&bindings.IsCapturing);
     private int BindingFirstSelection=>controllerDevices!=null?2:1;
     private bool DeviceRowSelected=>controllerDevices!=null&&selection==1;
-    private int Rows=>hudSizesOpen?HudSizeGroups.Length:tab==8?1:tab==7?6:tab==6?4:tab==5?4:tab==0?6:tab==4?7:tab==2?7:tab==1?11:bindings!=null?Idas3ControlBindings.ActionCount+BindingFirstSelection-1:0;
+    private int Rows=>hudSizesOpen?HudSizeGroups.Length:tab==8?1:tab==7?6:tab==6?4:tab==5?4:tab==0?6:tab==4?(Idas3Platform.IsAndroid?6:7):tab==2?7:tab==1?11:bindings!=null?Idas3ControlBindings.ActionCount+BindingFirstSelection-1:0;
     private static int Wrap(int value,int count)=>(value%count+count)%count;
     private void Update(){
         double now=Time.realtimeSinceStartupAsDouble;options?.Tick(now);
@@ -286,10 +297,10 @@ public sealed class Idas3PauseMenu : MonoBehaviour
     }
     private void KeepDisplay(){if(options.ConfirmDisplay())notice="OPTIONS SAVED";else notice=options.LastError??"Display change reverted.";}
     // Desktop-only features keep their rows (navigation is by row index) but
-    // are read-only on Android: no Discord desktop app, DirectInput wheels or
-    // unfocused-window audio there.
+    // are read-only on Android: no Discord desktop app or unfocused-window
+    // audio there. Wheel force feedback rows become the touch control rows.
     private bool NotOnThisPlatform(int row)=>Idas3Platform.IsAndroid&&!hudSizesOpen&&
-        ((tab==0&&row==5)||(tab==5&&row==2)||(tab==4&&row>=3&&row<=6)||(tab==1&&(row==0||row==2)));
+        ((tab==0&&row==5)||(tab==5&&row==2)||(tab==1&&(row==0||row==2)));
     private static string PlatformValue(string value)=>Idas3Platform.IsAndroid?"N/A ON ANDROID":value;
     private void Adjust(int row,int direction){
         var v=options.Draft;
@@ -347,6 +358,12 @@ public sealed class Idas3PauseMenu : MonoBehaviour
             if(row==0)v.controllerResponse=Wrap(v.controllerResponse+direction,ControllerResponses.Length);
             if(row==1)v.SteeringDeadzone=Mathf.Clamp(Mathf.Round(v.SteeringDeadzone*100)+direction,0,30)/100f;
             if(row==2)v.steeringSmoothing=Mathf.Clamp(Mathf.Round(v.steeringSmoothing*100)+direction,0,100)/100f;
+            if(Idas3Platform.IsAndroid){
+                if(row==3)v.touchTilt=!v.touchTilt;
+                if(row==4){if(v.touchTilt)v.touchTiltDegrees=Mathf.Clamp(v.touchTiltDegrees+5*direction,10,60);else v.touchSteeringTravel=Mathf.Clamp(Mathf.Round(v.touchSteeringTravel)+direction,6,30);}
+                if(row==5){OpenTouchEditor();return;}
+                notice="";return;
+            }
             if(row==3)v.wheelForceFeedback=!v.wheelForceFeedback;
             if(row==4&&wheelFeedback!=null){
                 var choices=wheelFeedback.Choices;if(choices.Count>0){
@@ -381,6 +398,7 @@ public sealed class Idas3PauseMenu : MonoBehaviour
     }
     private void OnGUI(){
         if(HudEditor!=null&&HudEditor.IsOpen)return;
+        if(EditingTouch)return; // The touch layout editor draws itself over the paused game.
         if(options==null)return;
         if(Updates!=null&&Updates.WindowVisible)return;
         if(!IsOpen&&(!AttractPromptVisible&&!options.Current.showFps||Event.current.type!=EventType.Repaint))return;
@@ -559,14 +577,22 @@ public sealed class Idas3PauseMenu : MonoBehaviour
             ChoiceRow(0,"RESPONSE PROFILE",ControllerResponses[v.controllerResponse]);
             SliderRow(1,"DEADZONE",v.SteeringDeadzone,.3f,value=>v.SteeringDeadzone=value);
             SliderRow(2,"SMOOTHING",v.steeringSmoothing,1,value=>v.steeringSmoothing=value);
-            Text(new Rect(290,326,681,22),"WHEEL FORCE FEEDBACK",small);
-            ChoiceRow(3,"FORCE FEEDBACK",PlatformValue(v.wheelForceFeedback?"ON":"OFF"));
-            ChoiceRow(4,"DEVICE",PlatformValue(WheelDeviceName(v.wheelFeedbackDevice)));
-            // A slider writes through its own callback, past Adjust's platform guard.
-            if(Idas3Platform.IsAndroid)ChoiceRow(5,"STRENGTH",PlatformValue(""));
-            else SliderRow(5,"STRENGTH",v.wheelFeedbackStrength,1,value=>v.wheelFeedbackStrength=value);
-            ChoiceRow(6,"INVERT FORCE",PlatformValue(v.wheelFeedbackInvert?"ON":"OFF"));
-            Text(new Rect(288,508,681,35),selection<=3?"Deadzone is saved separately for each response profile.":wheelFeedback?.StatusText??"Wheel feedback is unavailable.",wrapped);
+            if(Idas3Platform.IsAndroid){
+                // No DirectInput wheels on Android: the force feedback rows become touch control rows.
+                Text(new Rect(290,326,681,22),"TOUCH CONTROLS",small);
+                ChoiceRow(3,"TOUCH STEERING",v.touchTilt?"TILT PHONE":"DRAG");
+                ChoiceRow(4,"FULL LOCK",v.touchTilt?Idas3MenuLocalization.Format("{0}° TILT",v.touchTiltDegrees):Idas3MenuLocalization.Format("{0}% OF SCREEN HEIGHT",Mathf.RoundToInt(v.touchSteeringTravel)));
+                if(Button(new Rect(282,RowY(5)+2,692,33),"EDIT TOUCH LAYOUT",selection==6)){selection=6;OpenTouchEditor();}
+                Text(new Rect(288,508,681,35),selection<=3?"Deadzone is saved separately for each response profile.":selection==4?"Drag steers with a finger on the left side; tilt steers by turning the phone like a wheel.":
+                    selection==5?"How far to drag, or turn the phone, for full steering lock.":"Move, resize or fade each touch button. Race and menu layouts are separate.",wrapped);
+            }else{
+                Text(new Rect(290,326,681,22),"WHEEL FORCE FEEDBACK",small);
+                ChoiceRow(3,"FORCE FEEDBACK",v.wheelForceFeedback?"ON":"OFF");
+                ChoiceRow(4,"DEVICE",WheelDeviceName(v.wheelFeedbackDevice));
+                SliderRow(5,"STRENGTH",v.wheelFeedbackStrength,1,value=>v.wheelFeedbackStrength=value);
+                ChoiceRow(6,"INVERT FORCE",v.wheelFeedbackInvert?"ON":"OFF");
+                Text(new Rect(288,508,681,35),selection<=3?"Deadzone is saved separately for each response profile.":wheelFeedback?.StatusText??"Wheel feedback is unavailable.",wrapped);
+            }
         }else if(tab==8){
             // The in-game installer replaces Windows files; Android updates are a new APK.
             bool updater=Idas3Platform.UpdaterEnabled;

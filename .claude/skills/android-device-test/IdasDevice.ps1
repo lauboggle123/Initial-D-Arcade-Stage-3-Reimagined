@@ -76,27 +76,47 @@ function Get-IdasScreen {
     [pscustomobject]@{ Width = [Math]::Max($a, $b); Height = [Math]::Min($a, $b) }
 }
 
-# Centre of a touch-overlay control, mirroring Idas3TouchControls.Layout()
-# (u = height/100, 3u margins; assumes no display cutout insets).
+# Saved touch settings from game-options.json in the active save folder
+# (userdata-unity-test while the test environment flag exists). Missing
+# fields mean the defaults. Saved per launch, so read fresh on every call.
+function Get-IdasTouchLayout {
+    $folder = Invoke-IdasAdb shell "if [ -f $script:IdasFiles/test-environment ]; then echo test; else echo scene; fi"
+    $json = (Invoke-IdasAdb shell "cat $script:IdasFiles/userdata-unity-$(([string]$folder).Trim())/game-options.json 2>/dev/null") -join "`n"
+    $options = $null; if ($json.Trim().StartsWith('{')) { try { $options = $json | ConvertFrom-Json } catch { } }
+    $positions = @($options.touchPositions); $sizes = @($options.touchSizePercent)
+    [pscustomobject]@{
+        Offset = { param($slot) if ($slot -ge 0 -and $slot -lt $positions.Count -and $positions[$slot]) { [double]$positions[$slot].x, [double]$positions[$slot].y } else { 0.0, 0.0 } }.GetNewClosure()
+        Scale = { param($slot) if ($slot -ge 0 -and $slot -lt $sizes.Count -and [int]$sizes[$slot] -ne 0) { [int]$sizes[$slot] / 100.0 } else { 1.0 } }.GetNewClosure()
+        Travel = $(if ($options -and $options.touchSteeringTravel) { [double]$options.touchSteeringTravel / 100 } else { .15 })
+    }
+}
+
+# Centre of a touch-overlay control, mirroring Idas3TouchControls.RebuildLayout()
+# (u = height/100, 3u margins; assumes no display cutout insets) plus the saved
+# layout: offset in screen heights per slot, D-pad arrows scaled with their group.
+# Safe-area clamping of controls dragged against an edge is not mirrored.
 # Menu mode: Up Down Left Right A B View Start. Race mode: Gas Brake ShiftUp ShiftDown View Pause Steer.
 function Get-IdasPoint([Parameter(Mandatory)][string]$Control, [ValidateSet('Menu','Race')][string]$Mode = 'Menu') {
     $s = Get-IdasScreen; $u = $s.Height / 100.0; $right = $s.Width - 3 * $u; $bottom = $s.Height - 3 * $u
+    $rel = 0, 0
     if ($Mode -eq 'Menu') {
         $size = 13 * $u; $cx = 3 * $u + 1.5 * $size; $cy = $bottom - 1.5 * $size
-        $p = switch ($Control) {
-            'Up' { $cx, ($cy - $size) } 'Down' { $cx, ($cy + $size) } 'Left' { ($cx - $size), $cy } 'Right' { ($cx + $size), $cy }
-            'A' { ($right - 9.5 * $u), ($bottom - 15.5 * $u) } 'B' { ($right - 31.5 * $u), ($bottom - 7.5 * $u) }
-            'View' { ($right - 31.5 * $u), ($bottom - 27.5 * $u) } 'Start' { ($right - 10 * $u), (8 * $u) }
+        $slot, $p, $rel = switch ($Control) {
+            'Up' { 7, @($cx, $cy), @(0, -$size) } 'Down' { 7, @($cx, $cy), @(0, $size) }
+            'Left' { 7, @($cx, $cy), @(-$size, 0) } 'Right' { 7, @($cx, $cy), @($size, 0) }
+            'A' { 8, @(($right - 9.5 * $u), ($bottom - 15.5 * $u)), @(0, 0) } 'B' { 9, @(($right - 31.5 * $u), ($bottom - 7.5 * $u)), @(0, 0) }
+            'View' { 10, @(($right - 31.5 * $u), ($bottom - 27.5 * $u)), @(0, 0) } 'Start' { 6, @(($right - 10 * $u), (8 * $u)), @(0, 0) }
             default { throw "Unknown menu control $Control" } }
     } else {
-        $p = switch ($Control) {
-            'Pause' { ($right - 8.5 * $u), (47.5 * $u) } 'View' { ($right - 8.5 * $u), (58.5 * $u) }
-            'Gas' { ($right - 39.5 * $u), ($bottom - 20 * $u) } 'Brake' { ($right - 58.5 * $u), ($bottom - 14 * $u) }
-            'ShiftUp' { ($right - 39.5 * $u), ($bottom - 48.5 * $u) } 'ShiftDown' { ($right - 58.5 * $u), ($bottom - 36.5 * $u) }
-            'Steer' { ($s.Width * .25), ($s.Height * .67) }
+        $slot, $p = switch ($Control) {
+            'Pause' { 0, @(($right - 8.5 * $u), (47.5 * $u)) } 'View' { 1, @(($right - 8.5 * $u), (58.5 * $u)) }
+            'Gas' { 2, @(($right - 39.5 * $u), ($bottom - 20 * $u)) } 'Brake' { 3, @(($right - 58.5 * $u), ($bottom - 14 * $u)) }
+            'ShiftUp' { 4, @(($right - 39.5 * $u), ($bottom - 48.5 * $u)) } 'ShiftDown' { 5, @(($right - 58.5 * $u), ($bottom - 36.5 * $u)) }
+            'Steer' { -1, @(($s.Width * .25), ($s.Height * .67)) }
             default { throw "Unknown race control $Control" } }
     }
-    [pscustomobject]@{ X = [int]$p[0]; Y = [int]$p[1] }
+    $layout = Get-IdasTouchLayout; $offset = & $layout.Offset $slot; $scale = & $layout.Scale $slot
+    [pscustomobject]@{ X = [int]($p[0] + $offset[0] * $s.Height + $rel[0] * $scale); Y = [int]($p[1] + $offset[1] * $s.Height + $rel[1] * $scale) }
 }
 
 # A 150 ms press: shorter "input tap" events can begin and end inside one frame.
@@ -112,9 +132,9 @@ function Invoke-IdasHold([Parameter(Mandatory)][string]$Control, [double]$Second
     Start-Sleep -Milliseconds ([int]($Seconds * 1000))
     Invoke-IdasAdb shell input motionevent UP $p.X $p.Y | Out-Null
 }
-# Drag-steer: -1 full left .. 1 full right (full lock = 15% of screen height).
+# Drag-steer: -1 full left .. 1 full right (full lock = the saved FULL LOCK, default 15% of screen height).
 function Invoke-IdasSteer([double]$Amount, [double]$Seconds) {
-    $s = Get-IdasScreen; $p = Get-IdasPoint Steer Race; $x = [int]($p.X + [Math]::Max(-1, [Math]::Min(1, $Amount)) * .15 * $s.Height)
+    $s = Get-IdasScreen; $p = Get-IdasPoint Steer Race; $x = [int]($p.X + [Math]::Max(-1, [Math]::Min(1, $Amount)) * (Get-IdasTouchLayout).Travel * $s.Height)
     Invoke-IdasAdb shell input motionevent DOWN $p.X $p.Y | Out-Null
     Invoke-IdasAdb shell input motionevent MOVE $x $p.Y | Out-Null
     Start-Sleep -Milliseconds ([int]($Seconds * 1000))

@@ -90,11 +90,22 @@ public sealed class Idas3GameOptions
         public int minimapDisplay; // 0 = map, 1 = original water cup, 2 = off.
         public int minimapSize; // 0 = original, 1 = 125%, 2 = 150%.
         public int minimapZoom=2; // Zoom-out only: 50%, 75%, original 100%.
+        // Touch overlay (Idas3TouchControls slots: race 0-5, menu 6-10). Offsets are
+        // in screen heights from each default position; zero size/opacity keeps 100%.
+        public const int TouchControlCount=11;
+        public Vector2[] touchPositions=new Vector2[TouchControlCount];
+        public int[] touchSizePercent=new int[TouchControlCount],touchOpacityPercent=new int[TouchControlCount];
+        public bool touchTilt;
+        public float touchSteeringTravel=15; // Screen-height percent of drag for full lock.
+        public int touchTiltDegrees=30; // Phone rotation for full lock.
+        public Vector2 TouchOffset(int slot)=>touchPositions!=null&&slot>=0&&slot<touchPositions.Length?touchPositions[slot]:Vector2.zero;
+        public int TouchSizePercent(int slot)=>touchSizePercent!=null&&slot>=0&&slot<touchSizePercent.Length&&touchSizePercent[slot]!=0?touchSizePercent[slot]:100;
+        public int TouchOpacityPercent(int slot)=>touchOpacityPercent!=null&&slot>=0&&slot<touchOpacityPercent.Length&&touchOpacityPercent[slot]!=0?touchOpacityPercent[slot]:100;
         public float SteeringDeadzone {
             get=>controllerResponse==1?steeringDeadzonePrevious:controllerResponse==2?steeringDeadzoneWheel:steeringDeadzoneGamepad;
             set{if(controllerResponse==1)steeringDeadzonePrevious=value;else if(controllerResponse==2)steeringDeadzoneWheel=value;else steeringDeadzoneGamepad=value;}
         }
-        public Values Clone(){var copy=(Values)MemberwiseClone();copy.hudPositions=hudPositions==null?new Vector2[HudLayoutGroupCount]:(Vector2[])hudPositions.Clone();copy.hudSizePercent=hudSizePercent==null?new int[HudLayoutGroupCount]:(int[])hudSizePercent.Clone();return copy;}
+        public Values Clone(){var copy=(Values)MemberwiseClone();copy.hudPositions=hudPositions==null?new Vector2[HudLayoutGroupCount]:(Vector2[])hudPositions.Clone();copy.hudSizePercent=hudSizePercent==null?new int[HudLayoutGroupCount]:(int[])hudSizePercent.Clone();CopyTouchLayout(this,copy);return copy;}
     }
     public struct ResolutionChoice
     {
@@ -260,6 +271,20 @@ public sealed class Idas3GameOptions
         to.hudTimeExtensionSize=from.hudTimeExtensionSize;to.hudOrnamentSize=from.hudOrnamentSize;
         to.minimapDisplay=from.minimapDisplay;to.minimapSize=from.minimapSize;to.minimapZoom=from.minimapZoom;
     }
+    // The touch layout editor commits like the HUD editor: its own transaction,
+    // keeping unrelated pending edits (including touch steering rows) in the draft.
+    public bool ApplyTouchLayout(Values layout){
+        EnsureInitialized();if(DisplayConfirmationPending)return false;
+        var pending=draft.Clone();draft=current.Clone();CopyTouchLayout(layout,draft);
+        bool applied=ApplyDraft();
+        if(applied)CopyTouchLayout(current,pending);
+        draft=pending;return applied;
+    }
+    public static void CopyTouchLayout(Values from,Values to){
+        to.touchPositions=from.touchPositions==null?new Vector2[Values.TouchControlCount]:(Vector2[])from.touchPositions.Clone();
+        to.touchSizePercent=from.touchSizePercent==null?new int[Values.TouchControlCount]:(int[])from.touchSizePercent.Clone();
+        to.touchOpacityPercent=from.touchOpacityPercent==null?new int[Values.TouchControlCount]:(int[])from.touchOpacityPercent.Clone();
+    }
     public bool ConfirmDisplay(){
         if(!DisplayConfirmationPending)return false;
         try{SaveCurrent();rollback=null;LastError=null;return true;}
@@ -345,12 +370,26 @@ public sealed class Idas3GameOptions
         value.steeringSmoothing=float.IsNaN(value.steeringSmoothing)||float.IsInfinity(value.steeringSmoothing)?0:Math.Max(0,Math.Min(1,value.steeringSmoothing));
         value.wheelFeedbackStrength=float.IsNaN(value.wheelFeedbackStrength)||float.IsInfinity(value.wheelFeedbackStrength)?.35f:Math.Max(0,Math.Min(1,value.wheelFeedbackStrength));
         if(value.wheelFeedbackDevice==null||value.wheelFeedbackDevice.Length>512||value.wheelFeedbackDevice.IndexOf('\0')>=0)value.wheelFeedbackDevice="";
+        // Wide phones are ~2.3 screen heights across; the overlay re-clamps to the safe area.
+        var touch=new Vector2[Values.TouchControlCount];var touchSizes=new int[Values.TouchControlCount];var touchOpacity=new int[Values.TouchControlCount];
+        for(int i=0;i<touch.Length;++i){var point=value.TouchOffset(i);
+            touch[i]=new Vector2(float.IsNaN(point.x)||float.IsInfinity(point.x)?0:Mathf.Clamp(point.x,-3,3),float.IsNaN(point.y)||float.IsInfinity(point.y)?0:Mathf.Clamp(point.y,-1,1));
+            touchSizes[i]=value.TouchSizePercent(i)==100?0:Math.Max(50,Math.Min(200,value.TouchSizePercent(i)));
+            touchOpacity[i]=value.TouchOpacityPercent(i)==100?0:Math.Max(20,Math.Min(100,value.TouchOpacityPercent(i)));}
+        value.touchPositions=touch;value.touchSizePercent=touchSizes;value.touchOpacityPercent=touchOpacity;
+        value.touchSteeringTravel=float.IsNaN(value.touchSteeringTravel)||float.IsInfinity(value.touchSteeringTravel)?15:Math.Max(6,Math.Min(30,value.touchSteeringTravel));
+        value.touchTiltDegrees=Math.Max(10,Math.Min(60,value.touchTiltDegrees));
         return value;
     }
     private static float Deadzone(float value,float fallback)=>float.IsNaN(value)||float.IsInfinity(value)?fallback:Math.Max(0,Math.Min(.3f,value));
     public static bool DisplayChanged(Values a,Values b)=>a.displayMode!=b.displayMode||a.width!=b.width||a.height!=b.height;
     private static bool SameHudPositions(Values a,Values b){for(int i=0;i<Values.HudLayoutGroupCount;++i)if(a.HudOffset(i)!=b.HudOffset(i))return false;return true;}
     private static bool SameHudSizes(Values a,Values b){for(int i=1;i<Values.HudLayoutGroupCount;++i)if(a.HudSizePercent(i)!=b.HudSizePercent(i))return false;return true;}
+    private static bool SameTouch(Values a,Values b){
+        if(a.touchTilt!=b.touchTilt||a.touchSteeringTravel!=b.touchSteeringTravel||a.touchTiltDegrees!=b.touchTiltDegrees)return false;
+        for(int i=0;i<Values.TouchControlCount;++i)if(a.TouchOffset(i)!=b.TouchOffset(i)||a.TouchSizePercent(i)!=b.TouchSizePercent(i)||a.TouchOpacityPercent(i)!=b.TouchOpacityPercent(i))return false;
+        return true;
+    }
     public static bool Equivalent(Values a,Values b)=>a!=null&&b!=null&&
         a.masterVolume==b.masterVolume&&a.musicVolume==b.musicVolume&&a.engineVolume==b.engineVolume&&a.effectsVolume==b.effectsVolume&&a.tireVolume==b.tireVolume&&a.audioSettingsVersion==b.audioSettingsVersion&&
         !DisplayChanged(a,b)&&a.vSync==b.vSync&&a.frameRateLimit==b.frameRateLimit&&a.antiAliasing==b.antiAliasing&&
@@ -364,5 +403,5 @@ public sealed class Idas3GameOptions
         a.discordPresence==b.discordPresence&&a.hideLightsOffAdvantage==b.hideLightsOffAdvantage&&a.replayTimeAttack==b.replayTimeAttack&&a.replayOnline==b.replayOnline&&a.replayLegend==b.replayLegend&&
         a.hudMeterStyle==b.hudMeterStyle&&a.hudMeterLayout==b.hudMeterLayout&&a.hudOrnamentId==b.hudOrnamentId&&a.hudShiftLights==b.hudShiftLights&&a.hudPedalIndicators==b.hudPedalIndicators&&a.hudNameplateStyle==b.hudNameplateStyle&&
         SameHudPositions(a,b)&&SameHudSizes(a,b)&&a.hudOrnamentSize==b.hudOrnamentSize&&a.hudTimeExtensionSize==b.hudTimeExtensionSize&&a.hudTimerSize==b.hudTimerSize&&a.hudSpeedometerSize==b.hudSpeedometerSize&&a.hudRecordsSize==b.hudRecordsSize&&a.hudLegendSize==b.hudLegendSize&&a.hudOnlineSize==b.hudOnlineSize&&a.hudMirrorSize==b.hudMirrorSize&&a.hudMessagesSize==b.hudMessagesSize&&a.hudChallengersSize==b.hudChallengersSize&&
-        a.minimapDisplay==b.minimapDisplay&&a.minimapSize==b.minimapSize&&a.minimapZoom==b.minimapZoom&&a.rainDetail==b.rainDetail&&a.importedSceneryDetail==b.importedSceneryDetail&&a.trackLighting==b.trackLighting&&a.sunGlare==b.sunGlare;
+        a.minimapDisplay==b.minimapDisplay&&a.minimapSize==b.minimapSize&&a.minimapZoom==b.minimapZoom&&a.rainDetail==b.rainDetail&&a.importedSceneryDetail==b.importedSceneryDetail&&a.trackLighting==b.trackLighting&&a.sunGlare==b.sunGlare&&SameTouch(a,b);
 }

@@ -245,7 +245,7 @@ public sealed class Idas3SceneGame : MonoBehaviour
             if(!diagnosticMode)gameObject.AddComponent<Idas3CommunityTimes>().Initialize(this,gameOptions,pauseMenu);
             pauseMenu.InitializeBindings(controlBindings);
             controllerDevices.Initialize(saves);
-            if(Idas3TouchControls.Supported&&!diagnosticMode)touchControls=gameObject.AddComponent<Idas3TouchControls>();
+            if(Idas3TouchControls.Supported&&!diagnosticMode){touchControls=gameObject.AddComponent<Idas3TouchControls>();touchControls.Configure(gameOptions.Current);gameOptions.Changed+=touchControls.Configure;}
             Application.lowMemory-=OnLowMemory;Application.lowMemory+=OnLowMemory;
             controllerDevices.ActiveDeviceChanged += ControllerDeviceChanged;
             ControllerDeviceChanged();
