@@ -87,8 +87,9 @@ function Get-IdasScreen {
 }
 
 # Saved touch settings from game-options.json in the active save folder
-# (userdata-unity-test while the test environment flag exists). Missing
-# fields mean the defaults. Saved per launch, so read fresh on every call.
+# (userdata-unity-test while the test environment flag exists). Only Travel
+# (drag FULL LOCK) is still used; positions come from the logged layout
+# (Get-IdasPoint). Missing fields mean the defaults; read fresh on every call.
 function Get-IdasTouchLayout {
     $folder = Invoke-IdasAdb shell "if [ -f $script:IdasFiles/test-environment ]; then echo test; else echo scene; fi"
     $json = (Invoke-IdasAdb shell "cat $script:IdasFiles/userdata-unity-$(([string]$folder).Trim())/game-options.json 2>/dev/null") -join "`n"
