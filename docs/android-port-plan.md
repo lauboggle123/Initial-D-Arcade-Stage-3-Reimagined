@@ -241,7 +241,7 @@ Results (2026-10-25, test environment, Akina TA):
 - Reduce draw cost (the measured bottleneck) without changing source order: the renderer keeps "exact source list ordering, then exact submission ordering" and coplanar surfaces resolve by submission order (`Idas3SceneRenderer.cs:287`, `:646`), so merging or regrouping ranges is out. Allowed levers: cheaper per-draw state changes, a reduced-rate or optional mirror view, render scale.
 - Memory: no texture transcoding (see Phase 3). Use course unloading, optional mip limits as a setting, and on-demand audio banks. On GPUs without BC, Phase 3's decoded RGBA32 course textures are 4–8× larger than the packs (GUNSAI's 4096² atlas ≈ 85 MB); a mip limit there should skip the top decoded levels.
 - MSAA: imported foliage relies on MSAA to resolve derivative-scaled coverage (`Idas3SceneCommon.cginc`, "instead of binary leaf flicker"). Turning MSAA off on Low reintroduces leaf flicker; treat it as a visible trade-off, not a free saving.
-- Profile on at least one low and one mid phone (ideally Mali), using the Phase 2 test environment for long runs. Pass bar: Low holds 30 FPS (1% low ≥ 25) for 10 minutes without thermal collapse; Mid holds 60 on Akina/Akagi.
+- Profile on at least one low and one mid phone (ideally Mali), using the Phase 2 test environment for long runs. Pass bar: Low holds 30 FPS (1% low ≥ 25) for 10 minutes without thermal collapse; Mid holds 60 on Akina/Akagi. Each tier must also complete a full run, start to goal, on any course while holding its bar (requested 2026-10-25).
 
 ## Phase 6 — distribution (not started)
 - First-launch data installer: download data/course zips from GitHub Releases into app storage, SHA-256 verified, resumable, free-space check (~9 GB during install).
