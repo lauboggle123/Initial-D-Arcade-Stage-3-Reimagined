@@ -18,6 +18,7 @@ All approaches are checked against the CLAUDE.md rule: where the original author
 | 3 | Shader path without geometry shader; course packs on Android | **Built and verified 2026-10-24** (`06ad7e0f`, `c0cb50ca`): Adreno A/B with the fallback forced (Akina, Hakone, Enna), Windows D3D11 smokes on both paths, decoded-texture memory. Real Mali device **deferred by user** |
 | 4 | ROM import, lifecycle/saves, custom music import, phone options | **Done, device-tested 2026-10-24** (`8650edae`, follow-up `da6c601f`) |
 | 4b | Touch controls options: layout editing, steering sensitivity, tilt | **Done, device-tested 2026-10-24** (tilt confirmed by hand) |
+| 4c | Touch d-pad steering; slide-over shift buttons | Planned (agreed 2026-10-25), not started |
 | 5 | Performance tiers, resolution, profiling on low/mid phones | Not started |
 | 6 | Data installer, APK updates, release packaging, docs | Not started |
 | 7 | Determinism gate, then online + leaderboard submission | Not started |
@@ -152,6 +153,28 @@ As built:
 
 Results (2026-10-24, test environment): new rows and defaults shown; drag moved A; SIZE+ ×2 / FADE− saved as 120% / 80%; layout kept after relaunch; scripted `Invoke-IdasTap A` hit the moved button; overlap and HUD-cover warnings shown; RESET ALL + SAVE restored defaults; TILT PHONE / 35° applied and the race shows TILT TO STEER. Tilt direction and feel confirmed by hand after the axis fix (adb cannot drive the accelerometer). Only LandscapeLeft was measured; the screen-axis formula should hold for LandscapeRight.
 
+## Phase 4c — touch d-pad steering, slide-over shifting (planned, not started)
+Agreed with the user 2026-10-25. Estimate about 1 day plus one hands-on session. Unity touch layer only; no native change.
+
+**1) D-pad steering** (≈ half a day):
+- TOUCH STEERING becomes a three-way choice: DRAG / TILT PHONE / D-PAD. Replace the `touchTilt` bool with a mode, reading existing saves unchanged (`touchTilt=true` → TILT PHONE).
+- In D-PAD mode, two large ◀ ▶ buttons sit in the left area in place of the drag zone, with their own layout-editor slots (raise `Idas3GameOptions.Values.TouchControlCount`; older saves keep their slots).
+- Send the presses as the left/right steering keys, **not** as `thumbLX`. With original handling a full stick value goes to the wheel instantly (`main.cpp:1774`), so a stick d-pad would jump to full lock on every tap. The keys go through the existing digital ramp `advanceHostKeyboardSteering` (`host_steering_smoothing.h`, ≈0.17 s to full lock, quicker back to centre); both held cancels out. Needs a small path for the overlay to set keys in `FrameInput` (today `Apply` only fills the pad state).
+- Pause menu: FULL LOCK shows N/A in D-PAD mode (the ramp is fixed). No per-button lock amount at first.
+
+**2) Slide-over shift buttons** (≈ 2–3 h code):
+- Shift is level-based per simulation tick and the shifter acts on the press (`main.cpp:1782`: B = up, X = down). So "a finger currently over ▲/▼" counts as holding it: sliding in shifts once, staying does not repeat, out and back in shifts again. The press lasts while the finger stays over the button, so even a quick swipe lasts long enough to register.
+- A finger that started on GAS or BRAKE **keeps its pedal** while it passes over a shift button (roll a thumb from GAS up to ▲ without lifting the throttle).
+- Sliding ▲ ↔ ▼ on one finger shifts each time it enters.
+- The steering finger never shifts. No sliding between GAS and BRAKE.
+- Risk: the default GAS → ▲ gap is small, so a drifting gas thumb could shift by accident. Give the shift buttons only a small slide-in margin; optional SLIDE TO SHIFT on/off row (default on, ≈30 min).
+
+**Rule check:** the d-pad uses the author's own digital-steering ramp, and shifting stays a held button the native code already accepts.
+
+**Verification:**
+- The d-pad (taps, holds, reversing direction, editor slots) and a one-finger slide across ▲/▼ can be scripted with injected touch moves. Add a move/swipe helper to `IdasDevice.ps1` if needed.
+- Gas + d-pad and the GAS → ▲ thumb roll need two fingers, so they must be tested by hand.
+
 ## Phase 5 — performance for low/mid devices (not started)
 - Device tiers (auto-detected, user override): Low = 30 FPS, ~60% render scale, no MSAA, mirror off; Mid = 60 FPS target, ~75% scale, MSAA 2×, mirror at reduced rate; High = native, MSAA 4×.
 - Render scale via scaled render target with UI at native resolution; dynamic resolution from frame time to absorb thermal throttling. Android ignores vSync count: drive `Application.targetFrameRate`. On the 120 Hz test phone, UNLIMITED (display refresh rate) still gives ~60 FPS on a light screen: likely Unity reports the window's 60 Hz mode (not yet checked), so higher rates probably need a preferred display mode / frame-rate request.
@@ -174,8 +197,8 @@ Results (2026-10-24, test environment): new rows and defaults shown; drag moved 
 - Project skill `.claude/skills/android-device-test` (`IdasDevice.ps1`): install, push data/ROM, named overlay taps/holds/steering computed from screen size, screenshots, Unity logs. Records game-flow gotchas (Game Mode/Transmission use left/right; hidden menu countdown auto-picks Legend; Time Attack timer; single injectable finger). Phase 2 adds `Set-IdasTestEnvironment`; Phase 3 adds `Set-IdasFlag vertex-faces|perf-log|decode-dxt` and the A/B screenshot method.
 
 ## Housekeeping
-- Pushed to `origin/android-port` (2026-10-24): Phases 1–2 (`f9303aaa`, `84c7d10c`), plan `3867b03f`, Phase 4 `8650edae`, display/frame-limit follow-up `da6c601f`, Phase 4b `3af0b0d2`, tilt fix `2a861fd3`, housekeeping `3bf1f281`. Committed, **not pushed**: Phase 3 `06ad7e0f`, Phase 3 verification `c0cb50ca`. Uncommitted, awaiting the user's decision: `CLAUDE.md`, `.claude/skills/release/`.
-- Next: Phase 5 (performance tiers, mip limit, low/mid profiling) once hardware is available; Mali check for Phase 3 alongside it.
+- Pushed to `origin/android-port` (2026-10-24): Phases 1–2 (`f9303aaa`, `84c7d10c`), plan `3867b03f`, Phase 4 `8650edae`, display/frame-limit follow-up `da6c601f`, Phase 4b `3af0b0d2`, tilt fix `2a861fd3`, housekeeping `3bf1f281`; pushed 2026-10-25: Phase 3 `06ad7e0f`, Phase 3 verification `c0cb50ca`, plan/skill progress `e11295be`, Phase 4c plan. Uncommitted, awaiting the user's decision: `CLAUDE.md`, `.claude/skills/release/`.
+- Next: Phase 4c (touch d-pad, slide-over shifting) when the user starts it; Phase 5 (performance tiers, mip limit, low/mid profiling) once hardware is available; Mali check for Phase 3 alongside it.
 - `stash@{0}` (first Phase 3 attempt) exists only in the original working copy, also as local branch `android-phase3-stash-backup`; neither is on the remote. Its logger is now in the tree; the rest is superseded.
 - ~1,800 modified texture `.meta` files from the Android target switch: never commit.
 - Phone state (2026-10-24): app reinstalled fresh; base data + all 9 course packs pushed; ROM imported via the picker; test environment flag **on**, `vertex-faces`/`perf-log`/`decode-dxt` **off**; "stay awake on USB" enabled (`adb shell svc power stayon false` to undo). `userdata-unity-test` holds test driver "A" in slot 01 and TOUCH STEERING = TILT PHONE (35°): set it back to DRAG before scripted steering. `userdata-unity-scene` is a fresh real save (drag). `Custom Music` holds `idas3-test-tone.wav`.
