@@ -105,7 +105,8 @@ function Get-IdasTouchLayout {
 # (u = height/100, 3u margins; assumes no display cutout insets) plus the saved
 # layout: offset in screen heights per slot, D-pad arrows scaled with their group.
 # Safe-area clamping of controls dragged against an edge is not mirrored.
-# Menu mode: Up Down Left Right A B View Start. Race mode: Gas Brake ShiftUp ShiftDown View Pause Steer.
+# Menu mode: Up Down Left Right A B View Start. Race mode: Gas Brake ShiftUp ShiftDown View Pause Steer,
+# and SteerLeft SteerRight (shown only with TOUCH STEERING = D-PAD).
 function Get-IdasPoint([Parameter(Mandatory)][string]$Control, [ValidateSet('Menu','Race')][string]$Mode = 'Menu') {
     $s = Get-IdasScreen; $u = $s.Height / 100.0; $right = $s.Width - 3 * $u; $bottom = $s.Height - 3 * $u
     $rel = 0, 0
@@ -122,6 +123,7 @@ function Get-IdasPoint([Parameter(Mandatory)][string]$Control, [ValidateSet('Men
             'Pause' { 0, @(($right - 8.5 * $u), (47.5 * $u)) } 'View' { 1, @(($right - 8.5 * $u), (58.5 * $u)) }
             'Gas' { 2, @(($right - 39.5 * $u), ($bottom - 20 * $u)) } 'Brake' { 3, @(($right - 58.5 * $u), ($bottom - 14 * $u)) }
             'ShiftUp' { 4, @(($right - 39.5 * $u), ($bottom - 48.5 * $u)) } 'ShiftDown' { 5, @(($right - 58.5 * $u), ($bottom - 36.5 * $u)) }
+            'SteerLeft' { 11, @((16 * $u), ($bottom - 15 * $u)) } 'SteerRight' { 12, @((46 * $u), ($bottom - 15 * $u)) }
             'Steer' { -1, @(($s.Width * .25), ($s.Height * .67)) }
             default { throw "Unknown race control $Control" } }
     }
@@ -149,6 +151,22 @@ function Invoke-IdasSteer([double]$Amount, [double]$Seconds) {
     Invoke-IdasAdb shell input motionevent MOVE $x $p.Y | Out-Null
     Start-Sleep -Milliseconds ([int]($Seconds * 1000))
     Invoke-IdasAdb shell input motionevent UP $x $p.Y | Out-Null
+}
+
+# One finger sliding through race controls without lifting, e.g. Gas -> ShiftUp -> Gas
+# (the pedal stays held) or ShiftUp -> ShiftDown. Pauses $Dwell s on each control.
+function Invoke-IdasSlide([Parameter(Mandatory)][string[]]$Controls, [double]$Dwell = .3, [int]$Steps = 6) {
+    $path = @($Controls | % { Get-IdasPoint $_ Race })
+    Invoke-IdasAdb shell input motionevent DOWN $path[0].X $path[0].Y | Out-Null
+    Start-Sleep -Milliseconds ([int]($Dwell * 1000))
+    for ($i = 1; $i -lt $path.Count; ++$i) {
+        for ($k = 1; $k -le $Steps; ++$k) {
+            $x = [int]($path[$i - 1].X + ($path[$i].X - $path[$i - 1].X) * $k / $Steps); $y = [int]($path[$i - 1].Y + ($path[$i].Y - $path[$i - 1].Y) * $k / $Steps)
+            Invoke-IdasAdb shell input motionevent MOVE $x $y | Out-Null
+        }
+        Start-Sleep -Milliseconds ([int]($Dwell * 1000))
+    }
+    $last = $path[$path.Count - 1]; Invoke-IdasAdb shell input motionevent UP $last.X $last.Y | Out-Null
 }
 
 # PNG via cmd redirection (PowerShell 5.1 pipes would corrupt binary output).

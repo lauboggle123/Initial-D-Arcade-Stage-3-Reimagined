@@ -11,12 +11,14 @@ public sealed class Idas3TouchControls : MonoBehaviour
 {
     const ushort DpadUp = 0x0001, DpadDown = 0x0002, DpadLeft = 0x0004, DpadRight = 0x0008;
     const ushort Start = 0x0010, A = 0x1000, B = 0x2000, X = 0x4000, Y = 0x8000;
-    enum Control { None, Up, Down, Left, Right, Confirm, Back, View, Pause, Steer, Gas, Brake, ShiftUp, ShiftDown }
+    enum Control { None, Up, Down, Left, Right, Confirm, Back, View, Pause, Steer, Gas, Brake, ShiftUp, ShiftDown, SteerLeft, SteerRight }
     struct Button { public Control control; public Rect rect; public string label; public bool round; public int slot; }
 
-    // Layout slots saved in Idas3GameOptions.Values.touch*: race 0-5, menu 6-10. The D-pad is one slot.
+    // Layout slots saved in Idas3GameOptions.Values.touch*: race 0-5, menu 6-10, race
+    // steering d-pad 11-12 (appended so older saves keep their slots). The menu D-pad is one slot.
     const int SlotCount = Idas3GameOptions.Values.TouchControlCount;
-    static readonly string[] SlotNames = { "PAUSE", "VIEW", "GAS", "BRAKE", "SHIFT UP", "SHIFT DOWN", "START", "D-PAD", "A", "B", "VIEW" };
+    static readonly string[] SlotNames = { "PAUSE", "VIEW", "GAS", "BRAKE", "SHIFT UP", "SHIFT DOWN", "START", "D-PAD", "A", "B", "VIEW", "STEER LEFT", "STEER RIGHT" };
+    const int SteerLeftKey = 65, SteerRightKey = 68; // Canonical A / D driving keys.
 
     static Idas3TouchControls active;
     internal static Idas3TouchControls Instance => active;
@@ -29,7 +31,9 @@ public sealed class Idas3TouchControls : MonoBehaviour
     public bool Driving { get; private set; }
     public bool Editing => editing;
 
-    readonly Dictionary<int, Control> fingers = new Dictionary<int, Control>();
+    // Each finger keeps the control it began on; over = the shift button it is sliding across.
+    readonly Dictionary<int, Control> fingers = new Dictionary<int, Control>(), over = new Dictionary<int, Control>();
+    readonly Dictionary<int, Vector2> points = new Dictionary<int, Vector2>();
     readonly List<Button> buttons = new List<Button>();
     readonly HashSet<Control> held = new HashSet<Control>();
     readonly Rect[] slotHome = new Rect[SlotCount], slotRect = new Rect[SlotCount];
@@ -44,7 +48,7 @@ public sealed class Idas3TouchControls : MonoBehaviour
     bool layoutDriving, layoutDirty = true;
 
     // Editor state: a working copy of the options, committed only by SAVE.
-    bool editing, editDriving, dragging;
+    bool editing, editDriving, editDpad, dragging;
     Idas3GameOptions editOwner;
     Idas3GameOptions.Values working;
     Action<bool> editClosed;
@@ -52,7 +56,9 @@ public sealed class Idas3TouchControls : MonoBehaviour
     string editNotice = "";
 
     Idas3GameOptions.Values Layout => editing ? working : settings;
-    bool Tilt => settings.touchTilt && !editing;
+    bool Tilt => settings.touchSteering == 1 && !editing;
+    bool Dpad => editing ? editDpad : settings.touchSteering == 2;
+    bool Slide => settings.touchSlideShift && Driving;
     float Travel => settings.touchSteeringTravel * Screen.height / 100f;
 
     void Awake() { active = this; }
@@ -78,13 +84,15 @@ public sealed class Idas3TouchControls : MonoBehaviour
             if (touch.phase == TouchPhase.Began)
             {
                 var control = HitTest(point);
-                if (control == Control.None) continue;
-                fingers[touch.fingerId] = control;
+                // A race finger on empty screen is kept (as None) so it can slide onto ▲/▼.
+                if (control == Control.None && !Slide) continue;
+                fingers[touch.fingerId] = control; points[touch.fingerId] = point;
+                over[touch.fingerId] = control == Control.ShiftUp || control == Control.ShiftDown ? control : Control.None;
                 if (control == Control.Steer) { steerFinger = touch.fingerId; steerAnchor = steerPoint = point; }
             }
             else if (touch.phase == TouchPhase.Ended || touch.phase == TouchPhase.Canceled)
             {
-                fingers.Remove(touch.fingerId);
+                fingers.Remove(touch.fingerId); over.Remove(touch.fingerId); points.Remove(touch.fingerId);
                 if (touch.fingerId == steerFinger) { steerFinger = -1; steering = 0; }
             }
             else if (touch.fingerId == steerFinger)
@@ -97,11 +105,30 @@ public sealed class Idas3TouchControls : MonoBehaviour
                 if (offset > travel) steerAnchor.x = steerPoint.x - travel;
                 else if (offset < -travel) steerAnchor.x = steerPoint.x + travel;
             }
+            else if (fingers.ContainsKey(touch.fingerId))
+            {
+                points[touch.fingerId] = point;
+                over[touch.fingerId] = ShiftUnder(point, over.TryGetValue(touch.fingerId, out var shift) ? shift : Control.None);
+            }
         }
         // A finger lifted while the app missed its Ended phase must not stay held.
-        if (Input.touchCount == 0) { fingers.Clear(); steerFinger = -1; }
+        if (Input.touchCount == 0) { fingers.Clear(); over.Clear(); points.Clear(); steerFinger = -1; }
         held.Clear();
-        foreach (var control in fingers.Values) held.Add(control);
+        foreach (var finger in fingers)
+        {
+            var control = finger.Value;
+            var shift = over.TryGetValue(finger.Key, out var slid) ? slid : Control.None;
+            // A d-pad finger steers toward the nearer arrow until lifted, so a thumb
+            // rolling across reverses without letting go. Shift is level-based per
+            // tick and acts on the press, so a finger over ▲/▼ counts as holding it:
+            // sliding in shifts once, out and back in shifts again. GAS and BRAKE
+            // keep their pedal while their finger passes over a shift button.
+            if (control == Control.SteerLeft || control == Control.SteerRight) control = NearestDpad(points[finger.Key], control);
+            else if (Slide && (control == Control.ShiftUp || control == Control.ShiftDown || control == Control.None)) control = shift;
+            else if (Slide && (control == Control.Gas || control == Control.Brake)) held.Add(shift);
+            held.Add(control);
+        }
+        held.Remove(Control.None);
         if (Driving && Tilt) steering = Mathf.Lerp(steering, TiltSteering(), 1 - Mathf.Exp(-Time.unscaledDeltaTime * 15));
         else steering = steerFinger < 0 ? 0 : Mathf.Clamp((steerPoint.x - steerAnchor.x) / Travel, -1, 1);
     }
@@ -118,7 +145,37 @@ public sealed class Idas3TouchControls : MonoBehaviour
         return Mathf.Clamp(Mathf.Atan2(g.x, -g.y) * Mathf.Rad2Deg / settings.touchTiltDegrees, -1, 1);
     }
 
-    void Release() { fingers.Clear(); held.Clear(); steerFinger = -1; steering = 0; }
+    void Release() { fingers.Clear(); over.Clear(); points.Clear(); held.Clear(); steerFinger = -1; steering = 0; }
+
+    // Entering needs the drawn disk (a drifting gas thumb must not graze ▲); staying
+    // only needs the wider tap area, so jitter at the edge cannot repeat a shift.
+    Control ShiftUnder(Vector2 point, Control current)
+    {
+        if (!Slide) return Control.None;
+        float slop = Screen.height * .02f, best = float.MaxValue;
+        var hit = Control.None;
+        foreach (var button in buttons)
+        {
+            if (button.control != Control.ShiftUp && button.control != Control.ShiftDown) continue;
+            var area = new Rect(button.rect.x - slop, button.rect.y - slop, button.rect.width + 2 * slop, button.rect.height + 2 * slop);
+            if (button.control == current && area.Contains(point)) return current;
+            float distance = (point - button.rect.center).sqrMagnitude, radius = Mathf.Min(button.rect.width, button.rect.height) / 2;
+            if (distance <= radius * radius && distance < best) { best = distance; hit = button.control; }
+        }
+        return hit;
+    }
+
+    Control NearestDpad(Vector2 point, Control fallback)
+    {
+        float best = float.MaxValue;
+        foreach (var button in buttons)
+        {
+            if (button.control != Control.SteerLeft && button.control != Control.SteerRight) continue;
+            float distance = (point - button.rect.center).sqrMagnitude;
+            if (distance < best) { best = distance; fallback = button.control; }
+        }
+        return fallback;
+    }
 
     // Merge into the physical pad sample (a connected controller hides the overlay).
     public void Apply(ref Idas3ControlBindings.PadState pad)
@@ -138,7 +195,17 @@ public sealed class Idas3TouchControls : MonoBehaviour
         pad.buttons |= bits;
         if (held.Contains(Control.Gas)) pad.rightTrigger = 255;
         if (held.Contains(Control.Brake)) pad.leftTrigger = 255;
+        // D-pad steering goes in as keys (ApplyKeys): with original handling a full
+        // stick value reaches the wheel at once, keys use the digital-steering ramp.
         if (steerFinger >= 0 || Driving && Tilt) pad.thumbLX = (short)Mathf.RoundToInt(steering * (steering < 0 ? 32768f : 32767f));
+    }
+
+    // After the driving bindings have placed their keys.
+    internal void ApplyKeys(ref Idas3Native.FrameInput frame)
+    {
+        if (!Visible || !Driving) return;
+        if (held.Contains(Control.SteerLeft)) frame.SetKey(SteerLeftKey);
+        if (held.Contains(Control.SteerRight)) frame.SetKey(SteerRightKey); // Both held cancel out natively.
     }
 
     // Overlapping (moved or enlarged) controls: the touch goes to the nearest centre.
@@ -153,7 +220,7 @@ public sealed class Idas3TouchControls : MonoBehaviour
             if (area.Contains(point) && distance < best) { best = distance; hit = button.control; }
         }
         if (hit != Control.None) return hit;
-        return Driving && !Tilt && steerZone.Contains(point) ? Control.Steer : Control.None;
+        return Driving && !Tilt && !Dpad && steerZone.Contains(point) ? Control.Steer : Control.None;
     }
 
     static Rect SafeRect()
@@ -186,6 +253,12 @@ public sealed class Idas3TouchControls : MonoBehaviour
             Add(Control.Brake, placedBrake, "BRAKE", false, 3);
             Add(Control.ShiftUp, Place(4, new Rect(gas.x + 2 * u, gas.y - 15 * u, 13 * u, 13 * u), guiSafe), "▲", true, 4);
             Add(Control.ShiftDown, Place(5, new Rect(brake.x + 1 * u, brake.y - 15 * u, 13 * u, 13 * u), guiSafe), "▼", true, 5);
+            // D-pad steering replaces the drag zone: two thumb-sized arrows bottom left.
+            if (Dpad)
+            {
+                Add(Control.SteerLeft, Place(11, new Rect(left, bottom - 30 * u, 26 * u, 30 * u), guiSafe), "◀", false, 11);
+                Add(Control.SteerRight, Place(12, new Rect(left + 30 * u, bottom - 30 * u, 26 * u, 30 * u), guiSafe), "▶", false, 12);
+            }
             // Buttons hit-test before the zone, so one moved into it still wins.
             float reach = placedBrake.x - 8 * u - guiSafe.xMin;
             steerZone = new Rect(guiSafe.xMin, guiSafe.yMin + 16 * u, reach >= 25 * u ? Mathf.Min(guiSafe.width * .5f, reach) : guiSafe.width * .5f, guiSafe.height - 16 * u);
@@ -228,7 +301,8 @@ public sealed class Idas3TouchControls : MonoBehaviour
     public void BeginEdit(Idas3GameOptions owner, bool driving, Action<bool> closed)
     {
         if (editing || owner == null) return;
-        Release(); editOwner = owner; working = owner.Current.Clone(); editClosed = closed;
+        // The pending TOUCH STEERING row decides whether the d-pad slots are shown.
+        Release(); editOwner = owner; working = owner.Current.Clone(); editClosed = closed; editDpad = owner.Draft.touchSteering == 2;
         editing = true; editDriving = driving; dragging = false; editNotice = "";
         selectedSlot = driving ? 2 : 8; layoutDirty = true;
     }
@@ -380,7 +454,7 @@ public sealed class Idas3TouchControls : MonoBehaviour
         var old = GUI.color;
         if (editing) { RebuildLayout(); DrawEditor(); GUI.color = old; return; }
         DrawButtons(false);
-        if (Driving)
+        if (Driving && !Dpad)
         {
             float line = Mathf.Max(2f, Screen.height * .003f);
             float travel = Travel, knob = Screen.height * .09f;

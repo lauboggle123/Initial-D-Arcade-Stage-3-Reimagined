@@ -90,12 +90,14 @@ public sealed class Idas3GameOptions
         public int minimapDisplay; // 0 = map, 1 = original water cup, 2 = off.
         public int minimapSize; // 0 = original, 1 = 125%, 2 = 150%.
         public int minimapZoom=2; // Zoom-out only: 50%, 75%, original 100%.
-        // Touch overlay (Idas3TouchControls slots: race 0-5, menu 6-10). Offsets are
-        // in screen heights from each default position; zero size/opacity keeps 100%.
-        public const int TouchControlCount=11;
+        // Touch overlay (Idas3TouchControls slots: race 0-5, menu 6-10, race d-pad 11-12).
+        // Offsets are in screen heights from each default position; zero size/opacity keeps 100%.
+        public const int TouchControlCount=13;
         public Vector2[] touchPositions=new Vector2[TouchControlCount];
         public int[] touchSizePercent=new int[TouchControlCount],touchOpacityPercent=new int[TouchControlCount];
-        public bool touchTilt;
+        public int touchSteering; // 0 = drag, 1 = tilt phone, 2 = d-pad.
+        public bool touchTilt; // Phase 4b form of touchSteering==1, still written for older builds.
+        public bool touchSlideShift=true; // A finger sliding onto a shift button presses it.
         public float touchSteeringTravel=15; // Screen-height percent of drag for full lock.
         public int touchTiltDegrees=30; // Phone rotation for full lock.
         public Vector2 TouchOffset(int slot)=>touchPositions!=null&&slot>=0&&slot<touchPositions.Length?touchPositions[slot]:Vector2.zero;
@@ -191,7 +193,7 @@ public sealed class Idas3GameOptions
                 // Initialize missing fields explicitly. The zero marker lets
                 // old JSON migrate without treating saved zero deadzones as
                 // missing once these settings have been written.
-                var loaded=new Values{version=0,steeringSettingsVersion=0,audioSettingsVersion=0,hudMeterLayout=-1};
+                var loaded=new Values{version=0,steeringSettingsVersion=0,audioSettingsVersion=0,hudMeterLayout=-1,touchSteering=-1};
                 JsonUtility.FromJsonOverwrite(File.ReadAllText(file),loaded);
                 if(loaded==null||loaded.version!=1)throw new InvalidDataException("Unsupported options format.");
                 current=Normalize(loaded);loadedSaved=true;
@@ -379,6 +381,9 @@ public sealed class Idas3GameOptions
         value.touchPositions=touch;value.touchSizePercent=touchSizes;value.touchOpacityPercent=touchOpacity;
         value.touchSteeringTravel=float.IsNaN(value.touchSteeringTravel)||float.IsInfinity(value.touchSteeringTravel)?15:Math.Max(6,Math.Min(30,value.touchSteeringTravel));
         value.touchTiltDegrees=Math.Max(10,Math.Min(60,value.touchTiltDegrees));
+        if(value.touchSteering==-1)value.touchSteering=value.touchTilt?1:0;
+        else if(value.touchSteering<0||value.touchSteering>2)value.touchSteering=0;
+        value.touchTilt=value.touchSteering==1;
         return value;
     }
     private static float Deadzone(float value,float fallback)=>float.IsNaN(value)||float.IsInfinity(value)?fallback:Math.Max(0,Math.Min(.3f,value));
@@ -386,7 +391,7 @@ public sealed class Idas3GameOptions
     private static bool SameHudPositions(Values a,Values b){for(int i=0;i<Values.HudLayoutGroupCount;++i)if(a.HudOffset(i)!=b.HudOffset(i))return false;return true;}
     private static bool SameHudSizes(Values a,Values b){for(int i=1;i<Values.HudLayoutGroupCount;++i)if(a.HudSizePercent(i)!=b.HudSizePercent(i))return false;return true;}
     private static bool SameTouch(Values a,Values b){
-        if(a.touchTilt!=b.touchTilt||a.touchSteeringTravel!=b.touchSteeringTravel||a.touchTiltDegrees!=b.touchTiltDegrees)return false;
+        if(a.touchSteering!=b.touchSteering||a.touchSlideShift!=b.touchSlideShift||a.touchSteeringTravel!=b.touchSteeringTravel||a.touchTiltDegrees!=b.touchTiltDegrees)return false;
         for(int i=0;i<Values.TouchControlCount;++i)if(a.TouchOffset(i)!=b.TouchOffset(i)||a.TouchSizePercent(i)!=b.TouchSizePercent(i)||a.TouchOpacityPercent(i)!=b.TouchOpacityPercent(i))return false;
         return true;
     }

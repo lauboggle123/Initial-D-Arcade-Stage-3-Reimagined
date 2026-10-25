@@ -21,6 +21,7 @@ public sealed class Idas3PauseMenu : MonoBehaviour
     private static readonly string[] DisplayModes={"WINDOWED","BORDERLESS","FULLSCREEN"};
     private static readonly string[] CameraModes={"BUMPER","CHASE","NATURAL"};
     private static readonly string[] ControllerResponses={"FLYCAST GAMEPAD","PREVIOUS RESPONSE","FLYCAST WHEEL"};
+    private static readonly string[] TouchSteeringModes={"DRAG","TILT PHONE","D-PAD"};
     private static readonly int[] FrameCaps={0,30,60,90,120,144,165,240,360},AaValues={0,2,4,8};
     private Idas3GameOptions options;
     private Idas3ControlBindings bindings;
@@ -219,7 +220,7 @@ public sealed class Idas3PauseMenu : MonoBehaviour
     private bool Modal=>bindingChoice||pending!=Command.None||options.DisplayConfirmationPending||(bindings!=null&&bindings.IsCapturing);
     private int BindingFirstSelection=>controllerDevices!=null?2:1;
     private bool DeviceRowSelected=>controllerDevices!=null&&selection==1;
-    private int Rows=>hudSizesOpen?HudSizeGroups.Length:tab==8?1:tab==7?6:tab==6?4:tab==5?4:tab==0?6:tab==4?(Idas3Platform.IsAndroid?6:7):tab==2?7:tab==1?11:bindings!=null?Idas3ControlBindings.ActionCount+BindingFirstSelection-1:0;
+    private int Rows=>hudSizesOpen?HudSizeGroups.Length:tab==8?1:tab==7?6:tab==6?4:tab==5?4:tab==0?6:tab==4?7:tab==2?7:tab==1?11:bindings!=null?Idas3ControlBindings.ActionCount+BindingFirstSelection-1:0;
     private static int Wrap(int value,int count)=>(value%count+count)%count;
     private void Update(){
         double now=Time.realtimeSinceStartupAsDouble;options?.Tick(now);
@@ -359,9 +360,12 @@ public sealed class Idas3PauseMenu : MonoBehaviour
             if(row==1)v.SteeringDeadzone=Mathf.Clamp(Mathf.Round(v.SteeringDeadzone*100)+direction,0,30)/100f;
             if(row==2)v.steeringSmoothing=Mathf.Clamp(Mathf.Round(v.steeringSmoothing*100)+direction,0,100)/100f;
             if(Idas3Platform.IsAndroid){
-                if(row==3)v.touchTilt=!v.touchTilt;
-                if(row==4){if(v.touchTilt)v.touchTiltDegrees=Mathf.Clamp(v.touchTiltDegrees+5*direction,10,60);else v.touchSteeringTravel=Mathf.Clamp(Mathf.Round(v.touchSteeringTravel)+direction,6,30);}
+                if(row==3)v.touchSteering=Wrap(v.touchSteering+direction,TouchSteeringModes.Length);
+                // The d-pad uses the native digital-steering ramp, which has no lock setting.
+                if(row==4){if(v.touchSteering==2){notice="Not used with the d-pad.";return;}
+                    if(v.touchSteering==1)v.touchTiltDegrees=Mathf.Clamp(v.touchTiltDegrees+5*direction,10,60);else v.touchSteeringTravel=Mathf.Clamp(Mathf.Round(v.touchSteeringTravel)+direction,6,30);}
                 if(row==5){OpenTouchEditor();return;}
+                if(row==6)v.touchSlideShift=!v.touchSlideShift;
                 notice="";return;
             }
             if(row==3)v.wheelForceFeedback=!v.wheelForceFeedback;
@@ -580,11 +584,13 @@ public sealed class Idas3PauseMenu : MonoBehaviour
             if(Idas3Platform.IsAndroid){
                 // No DirectInput wheels on Android: the force feedback rows become touch control rows.
                 Text(new Rect(290,326,681,22),"TOUCH CONTROLS",small);
-                ChoiceRow(3,"TOUCH STEERING",v.touchTilt?"TILT PHONE":"DRAG");
-                ChoiceRow(4,"FULL LOCK",v.touchTilt?Idas3MenuLocalization.Format("{0}° TILT",v.touchTiltDegrees):Idas3MenuLocalization.Format("{0}% OF SCREEN HEIGHT",Mathf.RoundToInt(v.touchSteeringTravel)));
+                ChoiceRow(3,"TOUCH STEERING",TouchSteeringModes[Mathf.Clamp(v.touchSteering,0,TouchSteeringModes.Length-1)]);
+                ChoiceRow(4,"FULL LOCK",v.touchSteering==2?"N/A WITH D-PAD":v.touchSteering==1?Idas3MenuLocalization.Format("{0}° TILT",v.touchTiltDegrees):Idas3MenuLocalization.Format("{0}% OF SCREEN HEIGHT",Mathf.RoundToInt(v.touchSteeringTravel)));
                 if(Button(new Rect(282,RowY(5)+2,692,33),"EDIT TOUCH LAYOUT",selection==6)){selection=6;OpenTouchEditor();}
-                Text(new Rect(288,508,681,35),selection<=3?"Deadzone is saved separately for each response profile.":selection==4?"Drag steers with a finger on the left side; tilt steers by turning the phone like a wheel.":
-                    selection==5?"How far to drag, or turn the phone, for full steering lock.":"Move, resize or fade each touch button. Race and menu layouts are separate.",wrapped);
+                ChoiceRow(6,"SLIDE TO SHIFT",v.touchSlideShift?"ON":"OFF");
+                Text(new Rect(288,508,681,35),selection<=3?"Deadzone is saved separately for each response profile.":selection==4?"Drag steers with a finger on the left side, tilt by turning the phone like a wheel, d-pad with left/right buttons.":
+                    selection==5?"How far to drag, or turn the phone, for full steering lock.":selection==6?"Move, resize or fade each touch button. Race and menu layouts are separate.":
+                    "A finger sliding onto a shift button shifts once, from anywhere except steering. GAS and BRAKE stay pressed.",wrapped);
             }else{
                 Text(new Rect(290,326,681,22),"WHEEL FORCE FEEDBACK",small);
                 ChoiceRow(3,"FORCE FEEDBACK",v.wheelForceFeedback?"ON":"OFF");

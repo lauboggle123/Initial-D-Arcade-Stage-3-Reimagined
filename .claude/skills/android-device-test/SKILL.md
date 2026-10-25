@@ -30,9 +30,10 @@ The build switches Unity's active target to Android and rewrites ~1,800 texture 
 
 - `Assert-IdasDevice` before anything. "unauthorized" or a locked screen needs the user (Unity builds restart adb, which can re-trigger the USB-debugging prompt). `Set-IdasStayAwake` stops the phone dozing during long runs.
 - `Start-IdasGame -ClearLog`, then wait for `Get-IdasLog 'scene ready'` (ROM check + init ≈ 10–20 s on first launch) before tapping.
-- Menus: `Invoke-IdasTap Start|A|B|View|Up|Down|Left|Right [-Wait s]`. Races: `Invoke-IdasTap Pause|View|ShiftUp|ShiftDown -Mode Race`, `Invoke-IdasHold Gas 5`, `Invoke-IdasSteer 0.5 2`.
+- Menus: `Invoke-IdasTap Start|A|B|View|Up|Down|Left|Right [-Wait s]`. Races: `Invoke-IdasTap Pause|View|ShiftUp|ShiftDown -Mode Race`, `Invoke-IdasHold Gas 5`, `Invoke-IdasSteer 0.5 2`. With TOUCH STEERING = D-PAD: `Invoke-IdasHold SteerLeft 1` (no drag zone then). One-finger slides: `Invoke-IdasSlide Gas,ShiftUp,Gas` (gas stays held, one upshift), `Invoke-IdasSlide ShiftUp,ShiftDown`, `Invoke-IdasSlide SteerLeft,SteerRight`.
 - `Invoke-IdasHold` defaults to `-Mode Race` positions; menu holds (VIEW for Game Settings or music) need `-Mode Menu`.
 - Steering-driven menus (name entry, Game Mode) can move two steps per tap; screenshot after each move. Name entry: `Down` jumps ~16 characters, END sits two right of the space character.
+- Editing `game-options.json` with adb: stop the game and wait a few seconds first. The app writes its in-memory options as it goes down, so a file copied in right after `Stop-IdasGame` can be overwritten (seen 2026-10-25). Check the file's mtime afterwards, and never delete the only backup until the app has relaunched with it.
 - Only one finger can be injected (`input motionevent`); writing raw multitouch to `/dev/input` is blocked by SELinux. Gas+steer together must be tested by a person.
 - `Save-IdasScreenshot <path>` and read the PNG to confirm each screen before the next input. Taps that arrive during a screen's entry animation are ignored — wait 2–3 s after a transition, then verify.
 

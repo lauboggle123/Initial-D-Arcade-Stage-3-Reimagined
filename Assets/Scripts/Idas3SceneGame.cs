@@ -456,7 +456,10 @@ public sealed class Idas3SceneGame : MonoBehaviour
             // and simulation code receive the same analog ranges as before.
             bool drivingBindings = (Status.flags & (1u | 32u | 512u | 1024u | 4096u)) == 0 && Status.racePhase < 3;
             if (drivingBindings && !pauseMenu.IsOpen && !multiplayerMenu.BlocksGameInput)
+            {
                 controlBindings.ApplyDriving(ref frame);
+                if (touchControls != null && !controlBindings.SuppressInput) touchControls.ApplyKeys(ref frame);
+            }
             else controlBindings.ApplyMenu(ref frame,controllerDevices.ActiveIsGeneric,true);
             if (!Idas3SceneSmoke.PrepareFrame(ref frame)) return;
             if (!Idas3MultiplayerSmoke.PrepareFrame(ref frame)) return;
