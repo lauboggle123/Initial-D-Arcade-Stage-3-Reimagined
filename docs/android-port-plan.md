@@ -19,7 +19,7 @@ All approaches are checked against the CLAUDE.md rule: where the original author
 | 4 | ROM import, lifecycle/saves, custom music import, phone options | **Done, device-tested 2026-10-24** (`8650edae`, follow-up `da6c601f`) |
 | 4b | Touch controls options: layout editing, steering sensitivity, tilt | **Done, device-tested 2026-10-24** (tilt confirmed by hand) |
 | 4c | Touch d-pad steering; slide-over shift buttons | **Done, device-tested 2026-10-25** (scripted + by hand) |
-| 4d | Per steering mode: race touch layout, deadzone, smoothing; tilt default with BRAKE on the left; fit any phone display | **Done, device-tested 2026-10-25** (scripted; TILT thumb comfort by hand pending) |
+| 4d | Per steering mode: race touch layout, deadzone, smoothing; tilt default with BRAKE on the left; fit any phone display | **Done, device-tested 2026-10-25** (scripted + TILT by hand) |
 | 5 | Performance tiers, resolution, profiling on low/mid phones | Not started |
 | 6 | Data installer, APK updates, release packaging, docs | Not started |
 | 7 | Determinism gate, then online + leaderboard submission | Not started |
@@ -233,7 +233,7 @@ Results (2026-10-25, test environment, Akina TA):
 - Displays (`wm size`): 2480x1116 scale 1.00; 4:3 1600x1200 TILT and DRAG scale 1.00, no overlaps; 1:1 1300x1300 DRAG scale 0.83, no overlaps (first build's labels did not shrink, "BRAKE" wrapped; fixed); 21:9 2520x1080 menu at the edges, scale 1.00. Cutout emulation refused on this phone (SecurityException), not tested.
 - Editor: pending TILT showed "RACE · TILT" with the TILT default; BRAKE dragged and saved only into TILT's entries; DRAG/D-PAD untouched; BACK discarded the pending mode change.
 - Phone restored afterwards: D-PAD active, smoothing 0/0/30%, deadzone 0 for all, TILT layout default, DRAG/D-PAD keep the user's layout.
-- Not yet: thumb comfort of TILT by hand; a real second phone / tablet.
+- By hand (user, 2026-10-25): TILT layout works. Controller switching, cutout and a second phone/tablet skipped for now (user decision).
 
 ## Phase 5 — performance for low/mid devices (not started)
 - Device tiers (auto-detected, user override): Low = 30 FPS, ~60% render scale, no MSAA, mirror off; Mid = 60 FPS target, ~75% scale, MSAA 2×, mirror at reduced rate; High = native, MSAA 4×.
@@ -257,8 +257,8 @@ Results (2026-10-25, test environment, Akina TA):
 - Project skill `.claude/skills/android-device-test` (`IdasDevice.ps1`): install, push data/ROM, named overlay taps/holds/steering computed from screen size, screenshots, Unity logs. Records game-flow gotchas (Game Mode/Transmission use left/right; hidden menu countdown auto-picks Legend; Time Attack timer; single injectable finger). Phase 2 adds `Set-IdasTestEnvironment`; Phase 3 adds `Set-IdasFlag vertex-faces|perf-log|decode-dxt` and the A/B screenshot method. Phase 4c adds `SteerLeft`/`SteerRight` race points and `Invoke-IdasSlide` (one finger through several controls).
 
 ## Housekeeping
-- Pushed to `origin/android-port` (2026-10-24): Phases 1–2 (`f9303aaa`, `84c7d10c`), plan `3867b03f`, Phase 4 `8650edae`, display/frame-limit follow-up `da6c601f`, Phase 4b `3af0b0d2`, tilt fix `2a861fd3`, housekeeping `3bf1f281`; pushed 2026-10-25: Phase 3 `06ad7e0f`, Phase 3 verification `c0cb50ca`, plan/skill progress `e11295be`, Phase 4c plan, Phase 4c. Uncommitted, awaiting the user's decision: `CLAUDE.md`, `.claude/skills/release/`.
-- Next: hands-on check of the TILT layout (Phase 4d); Phase 5 (performance tiers, mip limit, low/mid profiling) once hardware is available; Mali check for Phase 3 alongside it.
+- Pushed to `origin/android-port` (2026-10-24): Phases 1–2 (`f9303aaa`, `84c7d10c`), plan `3867b03f`, Phase 4 `8650edae`, display/frame-limit follow-up `da6c601f`, Phase 4b `3af0b0d2`, tilt fix `2a861fd3`, housekeeping `3bf1f281`; pushed 2026-10-25: Phase 3 `06ad7e0f`, Phase 3 verification `c0cb50ca`, plan/skill progress `e11295be`, Phase 4c plan, Phase 4c, Phase 4d plan, Phase 4d. Uncommitted, awaiting the user's decision: `CLAUDE.md`, `.claude/skills/release/`.
+- Next: Phase 5 (performance tiers, mip limit, low/mid profiling) once hardware is available; Mali check for Phase 3 alongside it.
 - `stash@{0}` (first Phase 3 attempt) exists only in the original working copy, also as local branch `android-phase3-stash-backup`; neither is on the remote. Its logger is now in the tree; the rest is superseded.
 - ~1,800 modified texture `.meta` files from the Android target switch: never commit.
 - Phone state (2026-10-24): app reinstalled fresh; base data + all 9 course packs pushed; ROM imported via the picker; test environment flag **on**, `vertex-faces`/`perf-log`/`decode-dxt` **off**; "stay awake on USB" enabled (`adb shell svc power stayon false` to undo). `userdata-unity-test` holds test driver "A" in slot 01 (transmission MANUAL); since 2026-10-25 its options are TOUCH STEERING = D-PAD with the user's own race layout and response/smoothing changes: leave them unless asked. `userdata-unity-scene` is a fresh real save (drag). `Custom Music` holds `idas3-test-tone.wav`.
