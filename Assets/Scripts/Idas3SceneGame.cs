@@ -36,6 +36,9 @@ public sealed class Idas3SceneGame : MonoBehaviour
     private Idas3TouchControls touchControls;
     private bool touchSteeringResponse; // The overlay drives: the touch mode's deadzone/smoothing are live.
     private bool testEnvironment;
+    // Test environment + "road-log" flag file: course-relative pose at 10 Hz for device drive scripts.
+    private bool roadLog;
+    private double nextRoadLog;
     internal Idas3ControllerDevices ControllerDevices => controllerDevices;
     internal Idas3ControlBindings ControlBindings => controlBindings;
     internal Idas3Native.FrameInput DiagnosticSubmittedInput { get; private set; }
@@ -87,6 +90,8 @@ public sealed class Idas3SceneGame : MonoBehaviour
     private int windowedWidth = 1280, windowedHeight = 720;
     internal string Failure => failure;
     internal bool Ready => ready;
+    // Test environment: held timers and scripted drivers (virtual pad), so no run is a real attempt.
+    internal bool AutomatedRuns => testEnvironment;
     internal Idas3SceneRenderer SceneRenderer => scene;
     internal bool PresenceAllowed => ready&&!stopping&&!diagnosticMode;
     internal bool ReplayViewerOpen => replayLibrary!=null&&replayLibrary.ViewerOpen;
@@ -184,6 +189,7 @@ public sealed class Idas3SceneGame : MonoBehaviour
             testEnvironment = !diagnostic && File.Exists(Path.Combine(Application.persistentDataPath, "test-environment"));
             string priorSaves = Path.Combine(Application.persistentDataPath, "userdata");
             if (testEnvironment) { priorSaves = saves; saves = Path.Combine(Application.persistentDataPath, "userdata-unity-test"); }
+            roadLog = testEnvironment && File.Exists(Path.Combine(Application.persistentDataPath, "road-log"));
             if (!diagnostic && !Directory.Exists(saves))
             {
                 string prior = priorSaves;
@@ -527,6 +533,7 @@ public sealed class Idas3SceneGame : MonoBehaviour
             if(performanceDiagnostics)NetworkMilliseconds+=(float)((Time.realtimeSinceStartupAsDouble-networkBegan)*1000);
             Idas3MultiplayerPresentationSmoke.AfterFrame(this,multiplayer);
             UpdateWheelFeedback();
+            if (roadLog) LogRoadState();
             if (!OnlineRace && !challenger.Active && CanOpenPause && (Status.flags & 2u) != 0 && !pauseMenu.IsOpen && !multiplayerMenu.IsOpen)
                 pauseMenu.SetOpen(true);
             if (pauseMenu.IsOpen && !CanOpenPause && !OnlineRace && !(pauseMenu.AttractOptions && AttractScreen))
@@ -547,6 +554,18 @@ public sealed class Idas3SceneGame : MonoBehaviour
             }
         }
         catch (Exception error) { Fail(error.ToString()); }
+    }
+
+    // Read-only: the drive script decides what to press from these rows (IdasDevice.ps1 Invoke-IdasDrive).
+    private void LogRoadState()
+    {
+        double now = Time.realtimeSinceStartupAsDouble;
+        if (now < nextRoadLog) return;
+        nextRoadLog = now + .1;
+        var road = new Idas3Native.RoadState { size = 64 };
+        if (Idas3Native.Idas3SceneGetRoadState(ref road) != 1 || (road.flags & 1) == 0) return;
+        Debug.LogFormat(LogType.Log, LogOption.NoStacktrace, null, "IDAS3ROAD tick={0} phase={1} flags={2} prog={3:0.0} len={4:0.0} lat={5:0.00} half={6:0.00} head={7:0.000} steer={8:0.000} target={9:0.00} speed={10:0.00} gear={11} rpm={12:0} paused={13}",
+            road.simulationTicks, road.racePhase, road.flags, road.progress, road.length, road.lateral, road.halfWidth, road.headingToRoad, road.steer, road.targetSpeed, road.speed, road.gear, road.rpm, pauseMenu.IsOpen ? 1 : 0);
     }
 
     private static bool MultiplayerKey(KeyCode key) => key == KeyCode.LeftArrow || key == KeyCode.RightArrow || key == KeyCode.UpArrow || key == KeyCode.DownArrow ||

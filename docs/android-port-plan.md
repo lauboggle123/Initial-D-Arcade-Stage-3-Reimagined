@@ -20,9 +20,10 @@ All approaches are checked against the CLAUDE.md rule: where the original author
 | 4b | Touch controls options: layout editing, steering sensitivity, tilt | **Done, device-tested 2026-10-24** (tilt confirmed by hand) |
 | 4c | Touch d-pad steering; slide-over shift buttons | **Done, device-tested 2026-10-25** (scripted + by hand) |
 | 4d | Per steering mode: race touch layout, deadzone, smoothing; tilt default with BRAKE on the left; fit any phone display | **Done, device-tested 2026-10-25** (scripted + TILT by hand) |
-| 5 | Performance tiers, resolution, profiling on low/mid phones | Not started |
-| 6 | Data installer, APK updates, release packaging, docs | Not started |
-| 7 | Determinism gate, then online + leaderboard submission | Not started |
+| 5 | Scripted test driver: human-speed full runs (PC-trained, then phone via virtual pad) | In progress, paused 2026-10-25 (Akina DH ~192.0 s / 190, Akagi DH ~151.8 s / 148) |
+| 6 | Performance tiers, resolution, profiling on low/mid phones | Not started |
+| 7 | Data installer, APK updates, release packaging, docs | Not started |
+| 8 | Determinism gate, then online + leaderboard submission | Not started |
 
 ## Phase 1 — done (`f9303aaa`)
 - Rule review: checked the overlay, `Idas3Platform` paths and disabled features against the author's comments; no conflicts.
@@ -81,7 +82,7 @@ Results (Red Magic 9 Pro / Adreno 750, test environment, 2480×1116, 4× MSAA):
 - Enna (phone): draws on both paths, ~60 FPS, GPU 12.9–13.9 ms either way. Held on the brake at the start, geometry stage vs vertex faces differ in 164 view pixels by >8/255 (max 19), less than two frames of one path 2 s apart (2,580–4,906, max 37–40).
 - Windows D3D11 (`Build Unity.cmd`, player run with `-idas3-mode-flow-smoke`): `-idas3-enna-gates-check` passes on both paths (241 / 401 checks; the extra checks are the vertex-face keyword) and its 16 captures are bit-identical between paths. `-idas3-pause-course-check` passes on both (83 checks, 7 captures: Momiji, Myogi SS, Usui SS, Enna, Hakone, Sadamine, Akina); 5 captures are bit-identical, Myogi SS differs in 781 pixels (0.19%, max 27) and Hakone in 7 (max 14), all in dark foliage at the frame edge. Two geometry-stage runs are bit-identical, so these are real path differences, not noise; most likely edge-on paired faces where the two plane tests round differently (not proven).
 - Decoded-texture memory (phone, uploaded size from the course log line, all mips): Hakone 13.1 → 70.4 MB, Sadamine 48.4 → 127.0 MB; Unity texture memory 31.5 → 88.8 MB and 67.5 → 146.1 MB. GUNSAI's 4096² DXT1 atlas alone is ≈ 85 MB decoded (calculated, not measured). Process PSS does not include it on this phone.
-- Still unverified (deferred by user 2026-10-24, pick up when Mali hardware is available): a real Mali/no-geometry-shader GPU, which also exercises automatic SubShader selection and DXT decoding without forcing flags. Open questions for then: the Myogi SS/Hakone foliage-edge difference, and whether decoded memory needs Phase 5's mip limit on 4 GB phones.
+- Still unverified (deferred by user 2026-10-24, pick up when Mali hardware is available): a real Mali/no-geometry-shader GPU, which also exercises automatic SubShader selection and DXT decoding without forcing flags. Open questions for then: the Myogi SS/Hakone foliage-edge difference, and whether decoded memory needs Phase 6's mip limit on 4 GB phones.
 - The rebuilt Windows `Idas3Unity.dll` now exports `Idas3SceneSaveNow` (Phase 4 note).
 
 What was tried first (all in `stash@{0}`, also kept on branch `android-phase3-stash-backup`):
@@ -143,7 +144,7 @@ Constraints:
 - The edit mode must work with the overlay owning all touches while visible, and stay hidden when a controller is connected, as now.
 - Device testing: `IdasDevice.ps1` computes named taps from the default layout. Either reset to the default layout in the test environment or have the helpers read the saved layout; update `SKILL.md` accordingly.
 
-Test (device): edit and save a race layout, relaunch and confirm it is kept; rotate/resize and confirm controls stay inside the safe area; reset restores the default; scripted taps still hit their controls. Repeat on a second phone with a different aspect ratio once one is available (Phase 5 hardware).
+Test (device): edit and save a race layout, relaunch and confirm it is kept; rotate/resize and confirm controls stay inside the safe area; reset restores the default; scripted taps still hit their controls. Repeat on a second phone with a different aspect ratio once one is available (Phase 6 hardware).
 
 As built:
 - Steering & Wheel tab on Android: the wheel force feedback rows are replaced by TOUCH STEERING (DRAG / TILT PHONE), FULL LOCK (drag 6–30% of screen height, default 15; tilt 10–60°, default 30) and EDIT TOUCH LAYOUT.
@@ -235,7 +236,19 @@ Results (2026-10-25, test environment, Akina TA):
 - Phone restored afterwards: D-PAD active, smoothing 0/0/30%, deadzone 0 for all, TILT layout default, DRAG/D-PAD keep the user's layout.
 - By hand (user, 2026-10-25): TILT layout works. Controller switching, cutout and a second phone/tablet skipped for now (user decision).
 
-## Phase 5 — performance for low/mid devices (not started)
+## Phase 5 — scripted test driver (in progress, paused 2026-10-25)
+Skill: `android-race-run` (how to train, resume and run). Detailed status, checkpoints and logs: `Logs/drive-training/README.md` (git-ignored).
+- Why: Phase 6's pass bar needs a full start-to-goal run per tier, driven like a human. The first phone run with the old course-matrix hint took 558 s on Akina downhill; the user rejected that as too slow.
+- Gate (user): **Akina downhill under 3:10, Akagi downhill under 2:28**, trained on PC first; Android only once both are reached. Pad (non-touch) runs first, touch runs only after the pad runs are fine. Automated runs never upload times (test environment blocks Community Times; `Idas3SceneGame.AutomatedRuns`). Keep a replay of the best run for the user to review.
+- Built (uncommitted):
+  - native `TestDrivePolicy` (`main.cpp`) and the read-only `Idas3SceneGetRoadState` export (`unity_bridge.h/.cpp`, 64 bytes);
+  - the headless trainer `Native/tools/train_drive_policy.cpp` (target `train_drive_policy`), which feeds the phone's pad path with simulated adb delay and saves `.idreplay` files;
+  - the `IDAS3ROAD` log in the test environment (`road-log` flag);
+  - the virtual gamepad (`uinput`) and `Invoke-IdasDrive` in `IdasDevice.ps1`.
+- Results so far (user's slot 4 full-tuned AE86 MT; worst of adb delays 4/6/9 ticks): Akina DH about 192.0 s (target 190), Akagi DH about 151.8 s (target 148). The user's own records: 2'57"62 / 2'34"31. Replays: `testdriver_*_checkpoint.idreplay` in the PC Replay Library.
+- To do: close the gap (corner-entry braking, less full-lock steering, or following the human line); then wire the policy outputs into the phone's road rows and `Invoke-IdasDrive`, rebuild, and run on the phone.
+
+## Phase 6 — performance for low/mid devices (not started)
 - Device tiers (auto-detected, user override): Low = 30 FPS, ~60% render scale, no MSAA, mirror off; Mid = 60 FPS target, ~75% scale, MSAA 2×, mirror at reduced rate; High = native, MSAA 4×.
 - Render scale via scaled render target with UI at native resolution; dynamic resolution from frame time to absorb thermal throttling. Android ignores vSync count: drive `Application.targetFrameRate`. On the 120 Hz test phone, UNLIMITED (display refresh rate) still gives ~60 FPS on a light screen: likely Unity reports the window's 60 Hz mode (not yet checked), so higher rates probably need a preferred display mode / frame-rate request.
 - Reduce draw cost (the measured bottleneck) without changing source order: the renderer keeps "exact source list ordering, then exact submission ordering" and coplanar surfaces resolve by submission order (`Idas3SceneRenderer.cs:287`, `:646`), so merging or regrouping ranges is out. Allowed levers: cheaper per-draw state changes, a reduced-rate or optional mirror view, render scale.
@@ -243,13 +256,13 @@ Results (2026-10-25, test environment, Akina TA):
 - MSAA: imported foliage relies on MSAA to resolve derivative-scaled coverage (`Idas3SceneCommon.cginc`, "instead of binary leaf flicker"). Turning MSAA off on Low reintroduces leaf flicker; treat it as a visible trade-off, not a free saving.
 - Profile on at least one low and one mid phone (ideally Mali), using the Phase 2 test environment for long runs. Pass bar: Low holds 30 FPS (1% low ≥ 25) for 10 minutes without thermal collapse; Mid holds 60 on Akina/Akagi. Each tier must also complete a full run, start to goal, on any course while holding its bar (requested 2026-10-25).
 
-## Phase 6 — distribution (not started)
+## Phase 7 — distribution (not started)
 - First-launch data installer: download data/course zips from GitHub Releases into app storage, SHA-256 verified, resumable, free-space check (~9 GB during install).
 - APK updates through the Android package installer; data patches applied in-app.
 - `Tools/Build-ReleasePackage.py` / `Build-UpdatePatch.py` `--platform android`; move `StreamingAssets/SoundRoom` (282 MB) out of the APK; signing keystore from environment.
 - Docs: BUILDING.md (Android toolchain), README (player install).
 
-## Phase 7 — online (not started)
+## Phase 8 — online (not started)
 - Determinism gate: identical per-frame state hashes on x64 and arm64 for a scripted input run.
 - Then EOS Android SDK, online battles, leaderboard submission with a platform-specific build string.
 
@@ -258,7 +271,8 @@ Results (2026-10-25, test environment, Akina TA):
 
 ## Housekeeping
 - Pushed to `origin/android-port` (2026-10-24): Phases 1–2 (`f9303aaa`, `84c7d10c`), plan `3867b03f`, Phase 4 `8650edae`, display/frame-limit follow-up `da6c601f`, Phase 4b `3af0b0d2`, tilt fix `2a861fd3`, housekeeping `3bf1f281`; pushed 2026-10-25: Phase 3 `06ad7e0f`, Phase 3 verification `c0cb50ca`, plan/skill progress `e11295be`, Phase 4c plan, Phase 4c, Phase 4d plan, Phase 4d. Uncommitted, awaiting the user's decision: `CLAUDE.md`, `.claude/skills/release/`.
-- Next: Phase 5 (performance tiers, mip limit, low/mid profiling) once hardware is available; Mali check for Phase 3 alongside it.
+- Next: resume the scripted test driver training (Phase 5; `Logs/drive-training/README.md`) until both lap targets are met, then phone runs; Phase 6 tiers, mip limit and low/mid profiling once hardware is available; Mali check for Phase 3 alongside it.
+- Uncommitted (2026-10-25): scripted driver work (Phase 5), Community Times test-environment guard, `android-race-run` skill, `IdasDevice.ps1` pad helpers. `Assets/Plugins` binaries predate the trained policy: rebuild before any phone run.
 - `stash@{0}` (first Phase 3 attempt) exists only in the original working copy, also as local branch `android-phase3-stash-backup`; neither is on the remote. Its logger is now in the tree; the rest is superseded.
 - ~1,800 modified texture `.meta` files from the Android target switch: never commit.
-- Phone state (2026-10-24): app reinstalled fresh; base data + all 9 course packs pushed; ROM imported via the picker; test environment flag **on**, `vertex-faces`/`perf-log`/`decode-dxt` **off**; "stay awake on USB" enabled (`adb shell svc power stayon false` to undo). `userdata-unity-test` holds test driver "A" in slot 01 (transmission MANUAL); since 2026-10-25 its options are TOUCH STEERING = D-PAD with the user's own race layout and response/smoothing changes: leave them unless asked. `userdata-unity-scene` is a fresh real save (drag). `Custom Music` holds `idas3-test-tone.wav`.
+- Phone state (2026-10-24): app reinstalled fresh; base data + all 9 course packs pushed; ROM imported via the picker; test environment flag **on**, `vertex-faces`/`perf-log`/`decode-dxt` **off**; "stay awake on USB" enabled (`adb shell svc power stayon false` to undo). `userdata-unity-test` holds test driver "A" in slot 01 (transmission MANUAL); since 2026-10-25 its options are TOUCH STEERING = D-PAD with the user's own race layout and response/smoothing changes: leave them unless asked. `userdata-unity-scene` is a fresh real save (drag). `Custom Music` holds `idas3-test-tone.wav`. Since 2026-10-25 the `road-log` and `perf-log` flags are **on** (from the first scripted run); the installed APK has the old road hint, not the trained policy.

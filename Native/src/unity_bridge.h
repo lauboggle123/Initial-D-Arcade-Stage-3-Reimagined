@@ -85,6 +85,21 @@ typedef struct Idas3WheelState {
     float speed,steering,headingError,wallLateral,impact;
     uint32_t flags; //1 active driving,2 wall contact; steering positive right
 } Idas3WheelState;
+// Read-only course-relative pose for test drivers (device scripts); never fed back
+// into the simulation. steer/targetSpeed are the diagnostic course-matrix driver's
+// pure-pursuit hint, steer in stick convention (positive right).
+typedef struct Idas3RoadState {
+    uint32_t size,version;
+    uint64_t simulationTicks;
+    float progress,length;          // metres along the original centreline
+    float lateral,halfWidth;        // metres, lateral positive right of centre
+    float headingToRoad;            // radians, car yaw minus road tangent
+    float steer,targetSpeed,speed;  // -1..1 stick; metres/second
+    uint32_t racePhase;             // 0 ready,1 countdown,2 running,3 finished
+    uint32_t flags;                 // 1 road valid (original courses only),2 time up,4 wall contact,8 automatic
+    int32_t gear;                   // as on the HUD
+    float rpm;                      // as on the HUD
+} Idas3RoadState;
 // Read-only signals for optional host HUD themes. Does not change simulation.
 typedef struct Idas3HudTelemetry {
     uint32_t size,version,flags; // flags: 1 race, 2 automatic, 4 night, 8 drift; v3 bits 8..9: drift level; v4 bits 16..18: maximum gear
@@ -238,6 +253,7 @@ IDAS3_UNITY_EXPORT int IDAS3_UNITY_CALL Idas3SceneSetMapZoom(int zoom);
 IDAS3_UNITY_EXPORT int IDAS3_UNITY_CALL Idas3SceneSetAiDifficulty(int difficulty);
 IDAS3_UNITY_EXPORT float IDAS3_UNITY_CALL Idas3SceneGetSteeringSmoothing();
 IDAS3_UNITY_EXPORT int IDAS3_UNITY_CALL Idas3SceneGetWheelState(Idas3WheelState* state);
+IDAS3_UNITY_EXPORT int IDAS3_UNITY_CALL Idas3SceneGetRoadState(Idas3RoadState* state);
 IDAS3_UNITY_EXPORT int IDAS3_UNITY_CALL Idas3SceneGetHudTelemetry(Idas3HudTelemetry* state);
 IDAS3_UNITY_EXPORT int IDAS3_UNITY_CALL Idas3SceneGetOrnamentTelemetry(Idas3OrnamentTelemetry* state);
 IDAS3_UNITY_EXPORT int IDAS3_UNITY_CALL Idas3SceneGetPresentationTiming(Idas3PresentationTiming* state);

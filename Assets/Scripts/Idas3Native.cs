@@ -100,6 +100,17 @@ internal static class Idas3Native
         public uint flags;
     }
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int Idas3SceneGetWheelState(ref WheelState state);
+    // Mirrors Idas3RoadState (64 bytes): test-drive telemetry, original courses only.
+    [StructLayout(LayoutKind.Sequential, Pack=8)]
+    internal struct RoadState {
+        public uint size,version;
+        public ulong simulationTicks;
+        public float progress,length,lateral,halfWidth,headingToRoad,steer,targetSpeed,speed;
+        public uint racePhase,flags;
+        public int gear;
+        public float rpm;
+    }
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int Idas3SceneGetRoadState(ref RoadState state);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int Idas3SceneSetPaused(int paused);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int Idas3SceneRestart();
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int Idas3SceneReturnToCourse();

@@ -3662,6 +3662,105 @@ struct App {
         return renderer.draw(mesh,camera,target,night,wet,overlay,false,nullptr,rearView?&*rearView:nullptr);
     }
 };
+// Test driver for device scripts and the PC trainer (tools/train_drive_policy.cpp):
+// reads the car's pose against the original centreline and answers with pad values
+// (stick positive right, triggers 0..1). Never applied to the simulation by itself;
+// the host decides whether to press them, through the normal controller path.
+struct TestDriveParams {
+    float lateralAccel=9.f;   // m/s^2 corner speed limit from centreline curvature
+    float brakeDecel=7.f;     // m/s^2 assumed for the backward braking pass
+    float speedCap=60.f;      // m/s
+    float lookBase=7.f,lookTime=.40f; // pure-pursuit lookahead metres + seconds of speed
+    float steerGain=1.3f;
+    float apex=.45f;          // fraction of half width the aim moves to the inside of a bend
+    float preview=.12f;       // seconds the host's input arrives late; the policy plans ahead by it
+    float brakeGain=.6f;      // brake per m/s over target
+    float downshiftMargin=.92f; // drop a gear below this fraction of the speed it was left at
+    // Learned per course (PC trainer): corner-speed offset for each 1/64 of the course.
+    std::array<float,64> section{};
+    std::array<float,64> line{}; // learned aim offset per section, fraction of half width (+ right)
+};
+struct TestDriveOutput { float steer=0,throttle=0,brake=0,targetSpeed=0; int shift=0; bool valid=false; }; // shift: +1 up, -1 down
+class TestDrivePolicy {
+public:
+    TestDriveParams params;
+    TestDriveOutput decide(const App& app){
+        TestDriveOutput out;
+        if(app.menu||app.loadingActive||app.importedCourse||app.course.points.size()<2)return out;
+        refreshProfile(app);
+        const auto p=app.projectRacePosition(app.vehicle.position);const float speed=std::max(0.f,app.vehicle.speed);
+        const float s=p.sample.distance+speed*params.preview;
+        out.targetSpeed=profileAt(s);
+        const float look=params.lookBase+params.lookTime*speed;
+        const auto ahead=app.sampleRaceDistance(s+look);
+        // Aim to the inside of the bend that follows, by how sharply it turns.
+        const float turn=wrapAngle(heading(app.sampleRaceDistance(s+look*1.5f))-heading(app.sampleRaceDistance(s)));
+        const Vec3 right{ahead.tangent.z,0,-ahead.tangent.x};
+        const auto part=std::min(params.line.size()-1,std::size_t(std::clamp((s+look)/std::max(1.f,app.course.length),0.f,1.f)*float(params.line.size())));
+        const float inside=(std::clamp(turn/.6f,-1.f,1.f)*params.apex+params.line[part])*ahead.width*.5f;
+        const Vec3 position=app.vehicle.position+Vec3{std::sin(app.vehicle.yaw),0,std::cos(app.vehicle.yaw)}*(speed*params.preview);
+        const Vec3 aim=ahead.center+right*inside-position;
+        const float alpha=wrapAngle(std::atan2(aim.x,aim.z)-app.vehicle.yaw);
+        out.steer=-std::clamp(params.steerGain*std::atan2(2*app.config.wheelbase*std::sin(alpha),look)/recoveredSteeringLimit,-1.f,1.f);
+        const float over=speed-out.targetSpeed;
+        out.throttle=over<-.5f?1.f:over<.5f?.35f:0.f;
+        out.brake=std::clamp((over-.5f)*params.brakeGain,0.f,1.f);
+        if(!app.automatic&&app.originalHandling&&app.presentedSession().ready())out.shift=shift(app,speed);
+        out.valid=true;return out;
+    }
+private:
+    // Shift points from initiald-arcade.com/shift.php (AE86, 5 gears): tachometer rpm per
+    // gear, 8000-gauge normal engine 5.5-6-6.5k, 12000-gauge upgraded 8-9-10k; the last
+    // gear goes by speed, per course and direction ([bracket] values for 12-gauge cars).
+    static float lastGearKmh(int course,bool reverse,bool upgraded){
+        switch(course){
+        case 0:return upgraded?160.f:157.f;case 1:return 153.f;case 4:return upgraded?137.f:135.f;
+        case 2:case 3:return reverse?(upgraded?137.f:135.f):course==2?(upgraded?145.f:142.f):(upgraded?145.f:143.f);
+        case 5:return reverse?(upgraded?108.f:106.f):115.f;case 6:return upgraded?106.f:105.f;case 7:return upgraded?130.f:128.f;
+        case 8:return reverse?(upgraded?127.f:125.f):(upgraded?134.f:132.f);default:return 150.f;
+        }
+    }
+    int shift(const App& app,float speed){
+        const auto& box=app.presentedSession().parameters().transmission;
+        const int gear=app.vehicle.gear,top=int(box.maximumGear);const float rpm=app.presentedHudAnalog().rpm;
+        const bool upgraded=box.workingBase>9000;
+        if(gear<1||top<2||gear>=int(ratio.size()))return 0;
+        const std::array<float,3> normal{5500,6000,6500},tuned{8000,9000,10000};
+        const auto point=[&](int g){return g<=3?(upgraded?tuned:normal)[std::size_t(g-1)]:float(box.workingBase)*.92f;};
+        // rpm per m/s of each gear, learned while driving in it: picks the gear below
+        // when its rpm would still be under that gear's shift point (more power).
+        if(speed>8.f&&rpm>1500.f)ratio[std::size_t(gear)]=ratio[std::size_t(gear)]>0?ratio[std::size_t(gear)]*.9f+rpm/speed*.1f:rpm/speed;
+        if(gear==top-1){if(speed*3.6f>=lastGearKmh(app.courseIndex,app.reverse,upgraded))return 1;}
+        else if(gear<top-1&&rpm>=point(gear))return 1;
+        if(gear>1){
+            const float below=ratio[std::size_t(gear-1)];
+            if(gear==top){if(speed*3.6f<lastGearKmh(app.courseIndex,app.reverse,upgraded)*params.downshiftMargin)return -1;}
+            else if(below>0&&below*speed<point(gear-1)*params.downshiftMargin)return -1;
+        }
+        return 0;
+    }
+    std::array<float,8> ratio{};
+    static float heading(const CourseSample& c){return std::atan2(c.tangent.x,c.tangent.z);}
+    static constexpr float step=2.f;
+    std::vector<float> speeds;const void* course=nullptr;float length=0;TestDriveParams built{};
+    float profileAt(float s)const{
+        if(speeds.empty())return 0;const float i=std::clamp(s/step,0.f,float(speeds.size()-1));
+        const auto a=std::size_t(i);const auto b=std::min(a+1,speeds.size()-1);return speeds[a]+(speeds[b]-speeds[a])*(i-float(a));
+    }
+    void refreshProfile(const App& app){
+        if(course==&app.course&&length==app.course.length&&std::memcmp(&built,&params,sizeof(params))==0)return;
+        course=&app.course;length=app.course.length;built=params;
+        const auto n=std::size_t(std::max(2.f,length/step))+1;std::vector<float> curvature(n);speeds.assign(n,params.speedCap);
+        for(std::size_t i=0;i<n;++i)curvature[i]=std::abs(app.sampleRaceDistance(float(i)*step).curvature);
+        // Centreline curvature is noisy; a bend's limit comes from its sustained part.
+        for(std::size_t i=0;i<n;++i){
+            float sum=0;int count=0;for(std::ptrdiff_t k=-3;k<=3;++k){const auto j=std::ptrdiff_t(i)+k;if(j>=0&&j<std::ptrdiff_t(n)){sum+=curvature[std::size_t(j)];++count;}}
+            const auto part=std::min(params.section.size()-1,std::size_t(float(i)*step/std::max(1.f,length)*float(params.section.size())));
+            speeds[i]=std::min(params.speedCap,std::sqrt(params.lateralAccel/std::max(1e-4f,sum/float(count)))*(1.f+params.section[part]));
+        }
+        for(std::size_t i=n-1;i-->0;)speeds[i]=std::min(speeds[i],std::sqrt(speeds[i+1]*speeds[i+1]+2*params.brakeDecel*step));
+    }
+};
 #if !defined(IDAS3_PORTABLE_SCENE)
 App* current=nullptr;
 LRESULT CALLBACK windowProc(HWND h,UINT msg,WPARAM w,LPARAM l){

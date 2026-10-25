@@ -41,6 +41,7 @@ static_assert(sizeof(Idas3UnityStatus)==80);
 static_assert(sizeof(Idas3RivalStatus)==56);
 static_assert(sizeof(Idas3Options)==40);
 static_assert(sizeof(Idas3WheelState)==40);
+static_assert(sizeof(Idas3RoadState)==64);
 static_assert(sizeof(Idas3HudTelemetry)==40);
 static_assert(sizeof(Idas3OrnamentTelemetry)==40);
 static_assert(sizeof(Idas3PresentationTiming)==24);
@@ -1256,6 +1257,26 @@ int IDAS3_UNITY_CALL Idas3SceneGetWheelState(Idas3WheelState* out){
     out->headingError=std::remainder(d.f(0x108)-d.f(0x10),2.f*pi);
     out->wallLateral=d.f(0x258)*std::cos(app.vehicle.yaw)-d.f(0x25C)*std::sin(app.vehicle.yaw);
     out->impact=app.vehicle.wallImpactSpeed;out->flags=1|(app.vehicle.wallContact?2:0);return 1;
+}
+// Same aim and corner-speed rule as runCourseMatrix, which finishes all nine
+// original courses both ways; only reported, the host decides what to press.
+int IDAS3_UNITY_CALL Idas3SceneGetRoadState(Idas3RoadState* out){
+    auto& r=unityRuntime();std::lock_guard lock(r.renderMutex);
+    if(!r.sceneMode||!r.app||!out||out->size!=sizeof(*out)){unityError("Invalid road state request");return 0;}
+    *out={sizeof(*out),1};const auto& app=*r.app;
+    out->simulationTicks=app.vehicle.tick;out->racePhase=uint32_t(app.race.phase);
+    out->flags=(app.race.timeUp?2u:0u)|(app.vehicle.wallContact?4u:0u)|(app.automatic?8u:0u);out->speed=app.vehicle.speed;
+    out->gear=app.vehicle.gear;out->rpm=app.presentedHudAnalog().rpm;
+    if(app.menu||app.loadingActive||app.importedCourse||app.course.points.size()<2)return 1;
+    const auto p=app.projectRacePosition(app.vehicle.position);const float speed=std::max(0.f,app.vehicle.speed);
+    const float look=std::max(6.f,speed*.55f);float target=22;
+    for(float offset:{8.f,18.f,32.f,50.f})target=std::min(target,std::sqrt(4.5f/std::max(.001f,std::abs(app.sampleRaceDistance(p.sample.distance+offset).curvature))));
+    const Vec3 aim=app.sampleRaceDistance(p.sample.distance+look).center-app.vehicle.position;
+    const float angle=wrapAngle(std::atan2(aim.x,aim.z)-app.vehicle.yaw);
+    out->progress=p.sample.distance;out->length=app.course.length;out->lateral=p.lateral;out->halfWidth=p.sample.width*.5f;
+    out->headingToRoad=wrapAngle(app.vehicle.yaw-std::atan2(p.sample.tangent.x,p.sample.tangent.z));
+    out->steer=-std::clamp(std::atan2(2*app.config.wheelbase*std::sin(angle),look)/recoveredSteeringLimit,-1.f,1.f);
+    out->targetSpeed=std::clamp(target,7.f,22.f);out->flags|=1u;return 1;
 }
 int IDAS3_UNITY_CALL Idas3SceneGetHudTelemetry(Idas3HudTelemetry* out){
     auto& r=unityRuntime();std::lock_guard lock(r.renderMutex);
