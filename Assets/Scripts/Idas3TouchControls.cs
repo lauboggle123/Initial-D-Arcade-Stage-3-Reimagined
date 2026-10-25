@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text;
 using UnityEngine;
 
 // On-screen controls for touch devices. They act as a virtual Xbox-layout pad
@@ -19,12 +20,19 @@ public sealed class Idas3TouchControls : MonoBehaviour
     const int SlotCount = Idas3GameOptions.Values.TouchControlCount;
     static readonly string[] SlotNames = { "PAUSE", "VIEW", "GAS", "BRAKE", "SHIFT UP", "SHIFT DOWN", "START", "D-PAD", "A", "B", "VIEW", "STEER LEFT", "STEER RIGHT" };
     const int SteerLeftKey = 65, SteerRightKey = 68; // Canonical A / D driving keys.
+    static readonly string[] ModeNames = { "DRAG", "TILT", "D-PAD" };
+    // Default layout widths in units of screen height/100, margins included: the left group
+    // (drag track, BRAKE in TILT, d-pad), an 8u gap and the right group (BRAKE..PAUSE, 69u).
+    static readonly float[] RaceWidth = { 120, 100, 136 };
+    const float MenuWidth = 92, MinimumButtonMm = 7;
 
     static Idas3TouchControls active;
     internal static Idas3TouchControls Instance => active;
     // True while the overlay or its editor is on screen; the host ignores mouse emulation then.
     internal static bool OwnsPointer => active != null && (active.Visible || active.editing);
     internal static bool FreeMouseHeld => !OwnsPointer && Input.GetMouseButton(0);
+    // Test environment: each rebuilt layout is logged for the device scripts (IdasDevice.ps1).
+    internal static bool LogLayout;
     public static bool Supported => Idas3Platform.IsAndroid || Array.IndexOf(Environment.GetCommandLineArgs(), "-idas3-touch") >= 0;
 
     public bool Visible { get; private set; }
@@ -46,18 +54,22 @@ public sealed class Idas3TouchControls : MonoBehaviour
     int layoutWidth, layoutHeight;
     Rect layoutSafe, steerZone;
     bool layoutDriving, layoutDirty = true;
+    int layoutMode;
+    float layoutScale = 1;
 
     // Editor state: a working copy of the options, committed only by SAVE.
-    bool editing, editDriving, editDpad, dragging;
+    bool editing, editDriving, dragging;
     Idas3GameOptions editOwner;
     Idas3GameOptions.Values working;
     Action<bool> editClosed;
-    int selectedSlot;
+    int selectedSlot, editMode;
     string editNotice = "";
 
     Idas3GameOptions.Values Layout => editing ? working : settings;
+    // Each TOUCH STEERING mode has its own race layout; the editor shows the pending mode's.
+    int Mode => editing ? editMode : Mathf.Clamp(settings.touchSteering, 0, 2);
     bool Tilt => settings.touchSteering == 1 && !editing;
-    bool Dpad => editing ? editDpad : settings.touchSteering == 2;
+    bool Dpad => Mode == 2;
     bool Slide => settings.touchSlideShift && Driving;
     float Travel => settings.touchSteeringTravel * Screen.height / 100f;
 
@@ -68,6 +80,7 @@ public sealed class Idas3TouchControls : MonoBehaviour
     {
         if (values == null) return;
         settings = values.Clone(); layoutDirty = true;
+        if (!editing) Release(); // A finger on a control the new mode lacks must not stay held.
     }
 
     // Called once per host frame before the pad sample is used.
@@ -233,10 +246,12 @@ public sealed class Idas3TouchControls : MonoBehaviour
     {
         var guiSafe = SafeRect();
         bool driving = editing ? editDriving : Driving;
-        if (!layoutDirty && layoutWidth == Screen.width && layoutHeight == Screen.height && layoutSafe == guiSafe && layoutDriving == driving) return;
-        layoutDirty = false; layoutWidth = Screen.width; layoutHeight = Screen.height; layoutSafe = guiSafe; layoutDriving = driving;
+        int mode = Mode;
+        if (!layoutDirty && layoutWidth == Screen.width && layoutHeight == Screen.height && layoutSafe == guiSafe && layoutDriving == driving && layoutMode == mode) return;
+        layoutDirty = false; layoutWidth = Screen.width; layoutHeight = Screen.height; layoutSafe = guiSafe; layoutDriving = driving; layoutMode = mode;
         buttons.Clear();
-        float u = Screen.height / 100f;
+        layoutScale = FitScale(guiSafe, driving ? RaceWidth[mode] : MenuWidth);
+        float u = Screen.height / 100f * layoutScale;
         float left = guiSafe.xMin + 3 * u, right = guiSafe.xMax - 3 * u, top = guiSafe.yMin + 3 * u, bottom = guiSafe.yMax - 3 * u;
         if (driving)
         {
@@ -248,7 +263,8 @@ public sealed class Idas3TouchControls : MonoBehaviour
             // player's car (centre bottom) visible.
             var gas = new Rect(right - 48 * u, bottom - 40 * u, 17 * u, 40 * u);
             var brake = new Rect(gas.x - 18 * u, bottom - 28 * u, 15 * u, 28 * u);
-            var placedBrake = Place(3, brake, guiSafe);
+            // Tilt has no on-screen steering, so BRAKE takes the left thumb; ▼ keeps its place.
+            var placedBrake = Place(3, mode == 1 ? new Rect(left, bottom - 34 * u, 20 * u, 34 * u) : brake, guiSafe);
             Add(Control.Gas, Place(2, gas, guiSafe), "GAS", false, 2);
             Add(Control.Brake, placedBrake, "BRAKE", false, 3);
             Add(Control.ShiftUp, Place(4, new Rect(gas.x + 2 * u, gas.y - 15 * u, 13 * u, 13 * u), guiSafe), "▲", true, 4);
@@ -261,7 +277,13 @@ public sealed class Idas3TouchControls : MonoBehaviour
             }
             // Buttons hit-test before the zone, so one moved into it still wins.
             float reach = placedBrake.x - 8 * u - guiSafe.xMin;
-            steerZone = new Rect(guiSafe.xMin, guiSafe.yMin + 16 * u, reach >= 25 * u ? Mathf.Min(guiSafe.width * .5f, reach) : guiSafe.width * .5f, guiSafe.height - 16 * u);
+            if (mode == 1 && placedBrake.center.x < guiSafe.center.x)
+            {
+                // The TILT TO STEER indicator sits between the left BRAKE and the right-hand group.
+                float from = placedBrake.xMax + 4 * u, to = Mathf.Min(slotRect[2].x, slotRect[5].x) - 4 * u;
+                steerZone = new Rect(from, guiSafe.yMin + 16 * u, Mathf.Max(0, to - from), guiSafe.height - 16 * u);
+            }
+            else steerZone = new Rect(guiSafe.xMin, guiSafe.yMin + 16 * u, reach >= 25 * u ? Mathf.Min(guiSafe.width * .5f, reach) : guiSafe.width * .5f, guiSafe.height - 16 * u);
         }
         else
         {
@@ -279,15 +301,40 @@ public sealed class Idas3TouchControls : MonoBehaviour
             Add(Control.View, Place(10, new Rect(right - 39 * u, bottom - 35 * u, 15 * u, 15 * u), guiSafe), "VIEW", true, 10);
             steerZone = Rect.zero;
         }
+        if (LogLayout && !editing) LogControls(driving);
+    }
+
+    // Narrow safe areas (4:3 tablets, foldables) shrink the whole layout uniformly until the
+    // default fits, but never below thumb-sized ▲/▼ (13u at full size); past that the controls
+    // are only clamped inside the safe area. Wider screens keep the edge anchoring.
+    static float FitScale(Rect safe, float width)
+    {
+        float u = Screen.height / 100f;
+        float floor = Screen.dpi > 0 ? MinimumButtonMm / 25.4f * Screen.dpi / (13 * u) : .75f;
+        return Mathf.Clamp(safe.width / (width * u), Mathf.Min(floor, 1), 1);
+    }
+
+    void LogControls(bool driving)
+    {
+        var text = new StringBuilder();
+        text.AppendFormat("IDAS3 touch layout {0} {1} {2}x{3} scale {4:0.00}:", driving ? "race" : "menu", ModeNames[Mode], Screen.width, Screen.height, layoutScale);
+        foreach (var button in buttons)
+        {
+            var c = button.control;
+            string name = c == Control.Confirm ? "A" : c == Control.Back ? "B" : c == Control.Pause && !driving ? "Start" : c.ToString();
+            text.AppendFormat(" {0}={1},{2}", name, Mathf.RoundToInt(button.rect.center.x), Mathf.RoundToInt(button.rect.center.y));
+        }
+        if (driving && !Tilt && !Dpad) text.AppendFormat(" Steer={0},{1}", Mathf.RoundToInt(steerZone.center.x), Mathf.RoundToInt(steerZone.yMax - 2.2f * Travel));
+        Debug.LogFormat(LogType.Log, LogOption.NoStacktrace, null, "{0}", text);
     }
 
     // Saved offset and size around the default centre, kept wholly inside the safe area.
     Rect Place(int slot, Rect home, Rect bounds)
     {
         var layout = Layout;
-        var size = home.size * (layout.TouchSizePercent(slot) / 100f);
+        var size = home.size * (layout.TouchSizePercent(slot, Mode) / 100f);
         size = new Vector2(Mathf.Min(size.x, bounds.width), Mathf.Min(size.y, bounds.height));
-        var center = home.center + layout.TouchOffset(slot) * Screen.height;
+        var center = home.center + layout.TouchOffset(slot, Mode) * (Screen.height * layoutScale);
         var rect = new Rect(center - size / 2, size);
         rect.x = Mathf.Clamp(rect.x, bounds.xMin, bounds.xMax - rect.width);
         rect.y = Mathf.Clamp(rect.y, bounds.yMin, bounds.yMax - rect.height);
@@ -301,8 +348,8 @@ public sealed class Idas3TouchControls : MonoBehaviour
     public void BeginEdit(Idas3GameOptions owner, bool driving, Action<bool> closed)
     {
         if (editing || owner == null) return;
-        // The pending TOUCH STEERING row decides whether the d-pad slots are shown.
-        Release(); editOwner = owner; working = owner.Current.Clone(); editClosed = closed; editDpad = owner.Draft.touchSteering == 2;
+        // The pending TOUCH STEERING row decides which race layout is edited.
+        Release(); editOwner = owner; working = owner.Current.Clone(); editClosed = closed; editMode = Mathf.Clamp(owner.Draft.touchSteering, 0, 2);
         editing = true; editDriving = driving; dragging = false; editNotice = "";
         selectedSlot = driving ? 2 : 8; layoutDirty = true;
     }
@@ -325,7 +372,7 @@ public sealed class Idas3TouchControls : MonoBehaviour
     void MoveSelected(Vector2 delta)
     {
         int slot = selectedSlot;
-        working.touchPositions[slot] = (slotRect[slot].center + delta - slotHome[slot].center) / Screen.height;
+        working.SetTouchOffset(slot, editMode, (slotRect[slot].center + delta - slotHome[slot].center) / (Screen.height * layoutScale));
         SyncSelected();
     }
 
@@ -335,19 +382,18 @@ public sealed class Idas3TouchControls : MonoBehaviour
     {
         layoutDirty = true; RebuildLayout();
         int slot = selectedSlot;
-        working.touchPositions[slot] = (slotRect[slot].center - slotHome[slot].center) / Screen.height;
+        working.SetTouchOffset(slot, editMode, (slotRect[slot].center - slotHome[slot].center) / (Screen.height * layoutScale));
         layoutDirty = true; RebuildLayout();
     }
 
-    void StepSelected(int[] values, int fallback, int step, int minimum, int maximum)
+    void StepSelected(bool opacity, int step, int minimum, int maximum)
     {
-        int now = values[selectedSlot] == 0 ? fallback : values[selectedSlot];
-        int next = Mathf.Clamp(now + step, minimum, maximum);
-        values[selectedSlot] = next == fallback ? 0 : next;
+        int now = opacity ? working.TouchOpacityPercent(selectedSlot, editMode) : working.TouchSizePercent(selectedSlot, editMode);
+        working.SetTouchPercent(selectedSlot, editMode, opacity, Mathf.Clamp(now + step, minimum, maximum));
         SyncSelected();
     }
 
-    void ResetSlot(int slot) { working.touchPositions[slot] = Vector2.zero; working.touchSizePercent[slot] = 0; working.touchOpacityPercent[slot] = 0; }
+    void ResetSlot(int slot) { working.SetTouchOffset(slot, editMode, Vector2.zero); working.SetTouchPercent(slot, editMode, false, 100); working.SetTouchPercent(slot, editMode, true, 100); }
 
     // Approximate areas of the default race HUD and the chase-camera car.
     static Rect[] KeepOut(Rect safe, float u) => new[] {
@@ -376,7 +422,7 @@ public sealed class Idas3TouchControls : MonoBehaviour
                 if (buttons[i].slot != buttons[j].slot && buttons[i].rect.Overlaps(buttons[j].rect)) overlaps = true;
         if (editDriving)
         {
-            foreach (var zone in KeepOut(safe, u))
+            foreach (var zone in KeepOut(safe, u * layoutScale))
             {
                 foreach (var button in buttons) if (button.rect.Overlaps(zone)) covers = true;
                 if (e.type != EventType.Repaint) continue;
@@ -390,17 +436,17 @@ public sealed class Idas3TouchControls : MonoBehaviour
         if (e.type == EventType.Repaint) { GUI.color = new Color(.07f, .08f, .1f, .92f); GUI.DrawTexture(tools, Texture2D.whiteTexture); }
         GUI.color = Color.white;
         float x = tools.x + gap, y = tools.y + gap, w = (toolWidth - 6 * gap) / 5;
-        if (Tool(new Rect(x, y, w, row), "RACE", editDriving)) ShowEditLayout(true);
+        if (Tool(new Rect(x, y, w, row), "RACE · " + ModeNames[editMode], editDriving)) ShowEditLayout(true);
         if (Tool(new Rect(x + (w + gap), y, w, row), "MENU", !editDriving)) ShowEditLayout(false);
-        if (Tool(new Rect(x + 2 * (w + gap), y, w, row), "RESET ALL")) { for (int i = 0; i < SlotCount; ++i) ResetSlot(i); layoutDirty = true; editNotice = ""; }
+        if (Tool(new Rect(x + 2 * (w + gap), y, w, row), "RESET ALL")) { for (int i = 0; i < SlotCount; ++i) if (Idas3GameOptions.Values.IsRaceTouchSlot(i) == editDriving) ResetSlot(i); layoutDirty = true; editNotice = ""; }
         if (Tool(new Rect(x + 3 * (w + gap), y, w, row), "CANCEL")) { EndEdit(false); return; }
         if (Tool(new Rect(x + 4 * (w + gap), y, w, row), "SAVE", true)) { EndEdit(true); if (!editing) return; }
         y += row + gap; w = (toolWidth - 7 * gap) / 6;
         GUI.Label(new Rect(x, y, w, row), SlotNames[selectedSlot], toolStyle);
-        if (Tool(new Rect(x + (w + gap), y, w, row), "SIZE −")) StepSelected(working.touchSizePercent, 100, -10, 50, 200);
-        if (Tool(new Rect(x + 2 * (w + gap), y, w, row), "SIZE +")) StepSelected(working.touchSizePercent, 100, 10, 50, 200);
-        if (Tool(new Rect(x + 3 * (w + gap), y, w, row), "FADE −")) StepSelected(working.touchOpacityPercent, 100, -20, 20, 100);
-        if (Tool(new Rect(x + 4 * (w + gap), y, w, row), "FADE +")) StepSelected(working.touchOpacityPercent, 100, 20, 20, 100);
+        if (Tool(new Rect(x + (w + gap), y, w, row), "SIZE −")) StepSelected(false, -10, 50, 200);
+        if (Tool(new Rect(x + 2 * (w + gap), y, w, row), "SIZE +")) StepSelected(false, 10, 50, 200);
+        if (Tool(new Rect(x + 3 * (w + gap), y, w, row), "FADE −")) StepSelected(true, -20, 20, 100);
+        if (Tool(new Rect(x + 4 * (w + gap), y, w, row), "FADE +")) StepSelected(true, 20, 20, 100);
         if (Tool(new Rect(x + 5 * (w + gap), y, w, row), "RESET")) { ResetSlot(selectedSlot); SyncSelected(); }
 
         bool warning = editNotice.Length == 0 && (overlaps || covers);
@@ -450,7 +496,7 @@ public sealed class Idas3TouchControls : MonoBehaviour
         if (ring == null) ring = CreateDisk(128, 5);
         if (labelStyle == null) labelStyle = new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold };
         if (toolStyle == null) toolStyle = new GUIStyle(labelStyle) { wordWrap = true };
-        labelStyle.fontSize = Mathf.RoundToInt(Screen.height * .035f);
+        labelStyle.fontSize = Mathf.RoundToInt(Screen.height * .035f * layoutScale);
         var old = GUI.color;
         if (editing) { RebuildLayout(); DrawEditor(); GUI.color = old; return; }
         DrawButtons(false);
@@ -459,7 +505,7 @@ public sealed class Idas3TouchControls : MonoBehaviour
             float line = Mathf.Max(2f, Screen.height * .003f);
             float travel = Travel, knob = Screen.height * .09f;
             var anchor = steerFinger >= 0 ? steerAnchor : new Vector2(steerZone.center.x, steerZone.yMax - 2.2f * travel);
-            if (Tilt) { travel = Screen.height * .15f; anchor = new Vector2(steerZone.center.x, steerZone.yMax - 2.2f * travel); }
+            if (Tilt) { travel = Screen.height * .15f * layoutScale; anchor = new Vector2(steerZone.center.x, steerZone.yMax - 2.2f * travel); }
             var track = new Rect(anchor.x - travel - knob / 2, anchor.y - knob * .3f, 2 * travel + knob, knob * .6f);
             GUI.color = new Color(0, 0, 0, .3f);
             GUI.DrawTexture(track, Texture2D.whiteTexture);
@@ -483,7 +529,7 @@ public sealed class Idas3TouchControls : MonoBehaviour
         foreach (var button in buttons)
         {
             bool down = held.Contains(button.control);
-            float alpha = Layout.TouchOpacityPercent(button.slot) / 100f;
+            float alpha = Layout.TouchOpacityPercent(button.slot, Mode) / 100f;
             GUI.color = down ? new Color(.9f, .1f, .16f, .6f * alpha) : new Color(0, 0, 0, .32f * alpha);
             GUI.DrawTexture(button.rect, button.round ? disk : Texture2D.whiteTexture);
             bool selected = editor && button.slot == selectedSlot;

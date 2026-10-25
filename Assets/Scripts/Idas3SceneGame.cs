@@ -34,6 +34,7 @@ public sealed class Idas3SceneGame : MonoBehaviour
     private Idas3ControllerDevices controllerDevices = new Idas3ControllerDevices();
     private Idas3WheelFeedback wheelFeedback;
     private Idas3TouchControls touchControls;
+    private bool touchSteeringResponse; // The overlay drives: the touch mode's deadzone/smoothing are live.
     private bool testEnvironment;
     internal Idas3ControllerDevices ControllerDevices => controllerDevices;
     internal Idas3ControlBindings ControlBindings => controlBindings;
@@ -247,7 +248,7 @@ public sealed class Idas3SceneGame : MonoBehaviour
             pauseMenu.InitializeBindings(controlBindings);
             controllerDevices.Initialize(saves);
             if(Idas3PerformanceLog.Enabled&&!diagnosticMode)gameObject.AddComponent<Idas3PerformanceLog>().Initialize(this);
-            if(Idas3TouchControls.Supported&&!diagnosticMode){touchControls=gameObject.AddComponent<Idas3TouchControls>();touchControls.Configure(gameOptions.Current);gameOptions.Changed+=touchControls.Configure;}
+            if(Idas3TouchControls.Supported&&!diagnosticMode){touchControls=gameObject.AddComponent<Idas3TouchControls>();Idas3TouchControls.LogLayout=testEnvironment;touchControls.Configure(gameOptions.Current);gameOptions.Changed+=touchControls.Configure;}
             Application.lowMemory-=OnLowMemory;Application.lowMemory+=OnLowMemory;
             controllerDevices.ActiveDeviceChanged += ControllerDeviceChanged;
             ControllerDeviceChanged();
@@ -409,6 +410,13 @@ public sealed class Idas3SceneGame : MonoBehaviour
                     !networkRoom&&!pauseMenu.IsOpen&&!multiplayerMenu.BlocksGameInput&&!raceMusicMenu.BlocksGameInput&&
                     !saveMenuOwnsPointer&&!savePointerReleaseBlocked);
                 controllerDevices.TryRead(out physicalPad);
+            }
+            // A connected controller hides the overlay and takes its response profile's values.
+            bool touchResponse = touchControls != null && (Focused ? !physicalPad.connected : touchSteeringResponse);
+            if (touchResponse != touchSteeringResponse)
+            {
+                touchSteeringResponse = touchResponse; pauseMenu.TouchSteeringResponse = touchResponse;
+                if (!ApplySteeringResponse(gameOptions.Current)) Debug.LogWarning("Could not apply steering response. " + Idas3Native.Error());
             }
             if (touchControls != null)
             {
@@ -589,6 +597,18 @@ public sealed class Idas3SceneGame : MonoBehaviour
     }
 
     private void ApplyNativeOptions(Idas3GameOptions.Values values) => ApplyNativeOptions(values, true);
+    // The touch overlay keeps a deadzone and smoothing per TOUCH STEERING mode; a
+    // controller uses its response profile's. Native restarts its smoothing filter
+    // when the deadzone changes, so a switch mid-race starts it fresh.
+    private bool ApplySteeringResponse(Idas3GameOptions.Values values)
+    {
+        float deadzone = touchSteeringResponse ? values.TouchDeadzone(values.touchSteering) : values.SteeringDeadzone;
+        float smoothing = touchSteeringResponse ? values.TouchSmoothing(values.touchSteering) : values.steeringSmoothing;
+        if (Idas3Native.Idas3SceneSetSteeringDeadzone(deadzone) != 1 || Idas3Native.Idas3SceneSetSteeringSmoothing(smoothing) != 1) return false;
+        if (testEnvironment) Debug.LogFormat(LogType.Log, LogOption.NoStacktrace, null, "IDAS3 steering response {0}: deadzone {1:0.00}, smoothing {2:0.00}",
+            touchSteeringResponse ? "touch mode " + values.touchSteering : "controller profile " + values.controllerResponse, Idas3Native.Idas3SceneGetSteeringDeadzone(), Idas3Native.Idas3SceneGetSteeringSmoothing());
+        return true;
+    }
     private void ApplyNativeOptions(Idas3GameOptions.Values values, bool changeCamera)
     {
         if(Idas3Native.Idas3SceneSetCustomMenuLanguage(values.customMenuLanguage)!=1)throw new InvalidOperationException(Idas3Native.Error());
@@ -608,10 +628,8 @@ public sealed class Idas3SceneGame : MonoBehaviour
             throw new InvalidOperationException("Could not apply tire-squeal volume. " + Idas3Native.Error());
         if (Idas3Native.Idas3SceneSetControllerResponse(values.controllerResponse) != 1)
             throw new InvalidOperationException("Could not apply controller response. " + Idas3Native.Error());
-        if (Idas3Native.Idas3SceneSetSteeringDeadzone(values.SteeringDeadzone) != 1)
-            throw new InvalidOperationException("Could not apply steering deadzone. " + Idas3Native.Error());
-        if (Idas3Native.Idas3SceneSetSteeringSmoothing(values.steeringSmoothing) != 1)
-            throw new InvalidOperationException("Could not apply steering smoothing. " + Idas3Native.Error());
+        if (!ApplySteeringResponse(values))
+            throw new InvalidOperationException("Could not apply steering response. " + Idas3Native.Error());
         if (Idas3Native.Idas3SceneSetPerformance(values.rainDetail) != 1)
             throw new InvalidOperationException("Could not apply performance options. " + Idas3Native.Error());
         if (Idas3Native.Idas3SceneSetSunGlare(values.sunGlare?1:0) != 1)

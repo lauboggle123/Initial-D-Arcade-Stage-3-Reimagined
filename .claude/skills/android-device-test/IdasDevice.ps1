@@ -101,34 +101,19 @@ function Get-IdasTouchLayout {
     }
 }
 
-# Centre of a touch-overlay control, mirroring Idas3TouchControls.RebuildLayout()
-# (u = height/100, 3u margins; assumes no display cutout insets) plus the saved
-# layout: offset in screen heights per slot, D-pad arrows scaled with their group.
-# Safe-area clamping of controls dragged against an edge is not mirrored.
-# Menu mode: Up Down Left Right A B View Start. Race mode: Gas Brake ShiftUp ShiftDown View Pause Steer,
-# and SteerLeft SteerRight (shown only with TOUCH STEERING = D-PAD).
+# Centre of a touch-overlay control from the live layout the game logs in the test
+# environment ("IDAS3 touch layout race|menu <mode> WxH scale s: Gas=x,y ..."), so
+# per-mode layouts, saved edits, safe-area clamping and the narrow-screen fit are all
+# included. The overlay logs whenever it rebuilds (first shown, race <-> menu, mode or
+# screen change), so the screen in question must have been shown since the log was cleared.
+# Menu mode: Up Down Left Right A B View Start. Race mode: Gas Brake ShiftUp ShiftDown View Pause,
+# plus Steer (DRAG) or SteerLeft SteerRight (D-PAD).
 function Get-IdasPoint([Parameter(Mandatory)][string]$Control, [ValidateSet('Menu','Race')][string]$Mode = 'Menu') {
-    $s = Get-IdasScreen; $u = $s.Height / 100.0; $right = $s.Width - 3 * $u; $bottom = $s.Height - 3 * $u
-    $rel = 0, 0
-    if ($Mode -eq 'Menu') {
-        $size = 13 * $u; $cx = 3 * $u + 1.5 * $size; $cy = $bottom - 1.5 * $size
-        $slot, $p, $rel = switch ($Control) {
-            'Up' { 7, @($cx, $cy), @(0, -$size) } 'Down' { 7, @($cx, $cy), @(0, $size) }
-            'Left' { 7, @($cx, $cy), @(-$size, 0) } 'Right' { 7, @($cx, $cy), @($size, 0) }
-            'A' { 8, @(($right - 9.5 * $u), ($bottom - 15.5 * $u)), @(0, 0) } 'B' { 9, @(($right - 31.5 * $u), ($bottom - 7.5 * $u)), @(0, 0) }
-            'View' { 10, @(($right - 31.5 * $u), ($bottom - 27.5 * $u)), @(0, 0) } 'Start' { 6, @(($right - 10 * $u), (8 * $u)), @(0, 0) }
-            default { throw "Unknown menu control $Control" } }
-    } else {
-        $slot, $p = switch ($Control) {
-            'Pause' { 0, @(($right - 8.5 * $u), (47.5 * $u)) } 'View' { 1, @(($right - 8.5 * $u), (58.5 * $u)) }
-            'Gas' { 2, @(($right - 39.5 * $u), ($bottom - 20 * $u)) } 'Brake' { 3, @(($right - 58.5 * $u), ($bottom - 14 * $u)) }
-            'ShiftUp' { 4, @(($right - 39.5 * $u), ($bottom - 48.5 * $u)) } 'ShiftDown' { 5, @(($right - 58.5 * $u), ($bottom - 36.5 * $u)) }
-            'SteerLeft' { 11, @((16 * $u), ($bottom - 15 * $u)) } 'SteerRight' { 12, @((46 * $u), ($bottom - 15 * $u)) }
-            'Steer' { -1, @(($s.Width * .25), ($s.Height * .67)) }
-            default { throw "Unknown race control $Control" } }
-    }
-    $layout = Get-IdasTouchLayout; $offset = & $layout.Offset $slot; $scale = & $layout.Scale $slot
-    [pscustomobject]@{ X = [int]($p[0] + $offset[0] * $s.Height + $rel[0] * $scale); Y = [int]($p[1] + $offset[1] * $s.Height + $rel[1] * $scale) }
+    $line = Get-IdasLog "IDAS3 touch layout $($Mode.ToLower()) " | Select-Object -Last 1
+    if (-not $line) { throw "No $Mode touch layout logged yet: needs the test environment, and the $Mode screen shown since the log was cleared." }
+    $m = [regex]::Match($line, " $Control=(\d+),(\d+)")
+    if (-not $m.Success) { throw "$Control is not in the current $Mode layout: $line" }
+    [pscustomobject]@{ X = [int]$m.Groups[1].Value; Y = [int]$m.Groups[2].Value }
 }
 
 # A 150 ms press: shorter "input tap" events can begin and end inside one frame.

@@ -19,7 +19,7 @@ All approaches are checked against the CLAUDE.md rule: where the original author
 | 4 | ROM import, lifecycle/saves, custom music import, phone options | **Done, device-tested 2026-10-24** (`8650edae`, follow-up `da6c601f`) |
 | 4b | Touch controls options: layout editing, steering sensitivity, tilt | **Done, device-tested 2026-10-24** (tilt confirmed by hand) |
 | 4c | Touch d-pad steering; slide-over shift buttons | **Done, device-tested 2026-10-25** (scripted + by hand) |
-| 4d | Per steering mode: race touch layout, deadzone, smoothing; tilt default with BRAKE on the left; fit any phone display | Planned (requested 2026-10-25), not started |
+| 4d | Per steering mode: race touch layout, deadzone, smoothing; tilt default with BRAKE on the left; fit any phone display | **Done, device-tested 2026-10-25** (scripted; TILT thumb comfort by hand pending) |
 | 5 | Performance tiers, resolution, profiling on low/mid phones | Not started |
 | 6 | Data installer, APK updates, release packaging, docs | Not started |
 | 7 | Determinism gate, then online + leaderboard submission | Not started |
@@ -185,7 +185,7 @@ As built:
 
 Results (2026-10-25, test environment, Akina TA, MT): old save with `touchTilt: true` showed TILT PHONE; D-PAD + N/A WITH D-PAD + SLIDE TO SHIFT rows shown and saved (`touchSteering: 2`, `touchTilt: false`); editor showed ◀ ▶ (pending D-PAD) clear of the HUD/car zones; race shows ◀ ▶ and no drag track. Hold ◀: button lit, car yawed left. `Gas → ▲ → Gas`: 1 → 2 with speed 8 → 56 km/h (pedal held through the slide). `▲ → off → ▲`: 2 → 4. `▲ → ▼ → off → ▼`: 4 → 3. ◀ → past midpoint: ▶ lit. Empty-start slide (follow-up build): finger from empty road onto ▲ shifted 1 → 2. By hand (user, 2026-10-25): gas + d-pad held together works as intended; a thumb rolling up from GAS does shift onto ▲, which the user judged useful and kept (no smaller slide-in margin).
 
-## Phase 4d — touch layout and steering response per steering mode, fit any display (planned, not started)
+## Phase 4d — touch layout and steering response per steering mode, fit any display (done)
 Requested by the user 2026-10-25 (per-mode deadzone/smoothing added the same day). Estimate about 1 day plus a hands-on check. Unity touch layer only (`Idas3TouchControls`, `Idas3GameOptions`, pause menu); no native change, no native save change.
 
 **1) One race layout per steering mode:**
@@ -218,6 +218,23 @@ Requested by the user 2026-10-25 (per-mode deadzone/smoothing added the same day
 - Per-mode deadzone/smoothing: set clearly different values per mode for the test (e.g. DRAG 5% / 10%, TILT 20% / 60%, D-PAD — / 90%), switch modes in the pause menu and relaunch: each mode shows and keeps its own values, and `Idas3SceneGetSteeringDeadzone/Smoothing` (logged in the test environment) match the active mode; if a USB or Bluetooth controller is available, connect it and confirm the profile values are sent instead. D-PAD shows N/A for DEADZONE. **After testing, leave SMOOTHING at 30% for D-PAD and 0% for DRAG and TILT, and DEADZONE at 0% for all modes** on the phone's test save.
 - By hand: thumb comfort of the TILT layout (BRAKE left) on the real phone.
 
+As built:
+- `Values`: `touchModePositions` / `touchModeSizePercent` / `touchModeOpacityPercent` (index `mode*16+slot`, race slots 0–5 and 11–12; stride 16 leaves room for new slots), `touchModeLayouts` (loads as 0 from older saves → their race layout is copied to DRAG and D-PAD, TILT stays default), `touchDeadzone` / `touchSmoothing` (per mode, defaults 0/0/0 and 0/0/30%). The old arrays keep the menu slots; their race entries are left frozen for older builds (edits in this build don't reach them).
+- TILT default: BRAKE 20u × 34u bottom left; ▲ ▼ GAS PAUSE VIEW where they were; the TILT TO STEER indicator sits between BRAKE and the right group.
+- Fit: `FitScale` = safe width / default width (DRAG 120u, TILT 100u, D-PAD 136u, menu 92u), at most 1, floor from a 7 mm ▲/▼ (`Screen.dpi`; 0.75 when dpi is 0). Sizes, spacing, saved offsets, label font and the editor keep-out boxes all scale. Drag FULL LOCK travel does not (it is a sensitivity).
+- Live response: `Idas3SceneGame` sends the active touch mode's deadzone/smoothing while no controller is connected and the profile's otherwise, re-sending on every switch and on apply (`ApplySteeringResponse`). Pause menu rows read "DEADZONE · TILT" etc. while the overlay drives; D-PAD's deadzone shows N/A WITH D-PAD.
+- Editor: RACE button reads "RACE · <mode>" (pending mode); RESET ALL resets only the shown layout.
+- Test environment logs `IDAS3 touch layout …` (live control centres) and `IDAS3 steering response …`; `Get-IdasPoint` now reads the former.
+
+Results (2026-10-25, test environment, Akina TA):
+- Migration: the test save's custom race layout (D-PAD active) appeared unchanged in D-PAD and in DRAG; TILT opened with the new default. Saved file: `touchModeLayouts: 1`, DRAG and D-PAD entries equal to the old arrays, TILT zero.
+- Per-mode response: set DRAG 0%/8%, TILT 20%/60%, D-PAD –/91% in the pause menu; switching TOUCH STEERING showed each mode's own values; APPLY with TILT logged `touch mode 1: deadzone 0.20, smoothing 0.60`; after relaunch DRAG logged 0.00/0.08. With no controller the pause menu labels name the mode; D-PAD deadzone N/A. Controller connect/disconnect not tested (no controller available).
+- TILT race: BRAKE bottom left, held → lit and the car slowed; ▲ ▼ GAS on the right.
+- Displays (`wm size`): 2480x1116 scale 1.00; 4:3 1600x1200 TILT and DRAG scale 1.00, no overlaps; 1:1 1300x1300 DRAG scale 0.83, no overlaps (first build's labels did not shrink, "BRAKE" wrapped; fixed); 21:9 2520x1080 menu at the edges, scale 1.00. Cutout emulation refused on this phone (SecurityException), not tested.
+- Editor: pending TILT showed "RACE · TILT" with the TILT default; BRAKE dragged and saved only into TILT's entries; DRAG/D-PAD untouched; BACK discarded the pending mode change.
+- Phone restored afterwards: D-PAD active, smoothing 0/0/30%, deadzone 0 for all, TILT layout default, DRAG/D-PAD keep the user's layout.
+- Not yet: thumb comfort of TILT by hand; a real second phone / tablet.
+
 ## Phase 5 — performance for low/mid devices (not started)
 - Device tiers (auto-detected, user override): Low = 30 FPS, ~60% render scale, no MSAA, mirror off; Mid = 60 FPS target, ~75% scale, MSAA 2×, mirror at reduced rate; High = native, MSAA 4×.
 - Render scale via scaled render target with UI at native resolution; dynamic resolution from frame time to absorb thermal throttling. Android ignores vSync count: drive `Application.targetFrameRate`. On the 120 Hz test phone, UNLIMITED (display refresh rate) still gives ~60 FPS on a light screen: likely Unity reports the window's 60 Hz mode (not yet checked), so higher rates probably need a preferred display mode / frame-rate request.
@@ -241,7 +258,7 @@ Requested by the user 2026-10-25 (per-mode deadzone/smoothing added the same day
 
 ## Housekeeping
 - Pushed to `origin/android-port` (2026-10-24): Phases 1–2 (`f9303aaa`, `84c7d10c`), plan `3867b03f`, Phase 4 `8650edae`, display/frame-limit follow-up `da6c601f`, Phase 4b `3af0b0d2`, tilt fix `2a861fd3`, housekeeping `3bf1f281`; pushed 2026-10-25: Phase 3 `06ad7e0f`, Phase 3 verification `c0cb50ca`, plan/skill progress `e11295be`, Phase 4c plan, Phase 4c. Uncommitted, awaiting the user's decision: `CLAUDE.md`, `.claude/skills/release/`.
-- Next: Phase 4d (touch layout per steering mode, fit any display) when the user starts it; Phase 5 (performance tiers, mip limit, low/mid profiling) once hardware is available; Mali check for Phase 3 alongside it.
+- Next: hands-on check of the TILT layout (Phase 4d); Phase 5 (performance tiers, mip limit, low/mid profiling) once hardware is available; Mali check for Phase 3 alongside it.
 - `stash@{0}` (first Phase 3 attempt) exists only in the original working copy, also as local branch `android-phase3-stash-backup`; neither is on the remote. Its logger is now in the tree; the rest is superseded.
 - ~1,800 modified texture `.meta` files from the Android target switch: never commit.
 - Phone state (2026-10-24): app reinstalled fresh; base data + all 9 course packs pushed; ROM imported via the picker; test environment flag **on**, `vertex-faces`/`perf-log`/`decode-dxt` **off**; "stay awake on USB" enabled (`adb shell svc power stayon false` to undo). `userdata-unity-test` holds test driver "A" in slot 01 (transmission MANUAL); since 2026-10-25 its options are TOUCH STEERING = D-PAD with the user's own race layout and response/smoothing changes: leave them unless asked. `userdata-unity-scene` is a fresh real save (drag). `Custom Music` holds `idas3-test-tone.wav`.

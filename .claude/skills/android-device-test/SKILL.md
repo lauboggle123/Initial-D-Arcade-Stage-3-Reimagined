@@ -66,4 +66,6 @@ The build switches Unity's active target to Android and rewrites ~1,800 texture 
 
 ## Coordinates
 
-`Get-IdasPoint` derives control centres from `Idas3TouchControls.Layout()` (`u = screen height / 100`) and the live screen size, assuming no display-cutout insets. If `Idas3TouchControls.cs` layout changes, update `Get-IdasPoint` to match.
+`Get-IdasPoint` reads the control centres the overlay logs in the **test environment** each time it rebuilds a layout (`Get-IdasLog 'touch layout'`: `IDAS3 touch layout race|menu <DRAG|TILT|D-PAD> WxH scale s: Gas=x,y …`), so per-mode race layouts, saved edits, safe-area clamping and the narrow-screen fit are included. The layout must have been shown since the log was last cleared (a race for `-Mode Race`); without the test environment nothing is logged and the helpers throw. Each TOUCH STEERING mode has its own race layout: TILT's default puts BRAKE bottom left.
+- Other displays: `Invoke-IdasAdb shell wm size 1200x1600` (4:3), `1300x1300`, `1080x2520` (21:9) resize the running game; `wm size reset` afterwards. Display-cutout emulation (`cmd overlay enable …cutout.emulation.*`) is refused on the test phone (SecurityException).
+- The live steering deadzone/smoothing are logged too (`Get-IdasLog 'steering response'`): touch mode values while no controller is connected, the response profile's otherwise.

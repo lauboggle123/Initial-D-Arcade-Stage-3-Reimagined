@@ -101,13 +101,38 @@ public sealed class Idas3GameOptions
         public float touchSteeringTravel=15; // Screen-height percent of drag for full lock.
         public int touchTiltDegrees=30; // Phone rotation for full lock.
         public Vector2 TouchOffset(int slot)=>touchPositions!=null&&slot>=0&&slot<touchPositions.Length?touchPositions[slot]:Vector2.zero;
-        public int TouchSizePercent(int slot)=>touchSizePercent!=null&&slot>=0&&slot<touchSizePercent.Length&&touchSizePercent[slot]!=0?touchSizePercent[slot]:100;
-        public int TouchOpacityPercent(int slot)=>touchOpacityPercent!=null&&slot>=0&&slot<touchOpacityPercent.Length&&touchOpacityPercent[slot]!=0?touchOpacityPercent[slot]:100;
+        public int TouchSizePercent(int slot)=>Percent(touchSizePercent,slot);
+        public int TouchOpacityPercent(int slot)=>Percent(touchOpacityPercent,slot);
+        // Race slots have one layout per touchSteering mode, flat (JsonUtility has no nested
+        // arrays) at mode*TouchModeStride+slot; the stride leaves room for appended race slots.
+        // The arrays above keep the menu slots and, frozen, the race layout older builds read.
+        public const int TouchModeCount=3,TouchModeStride=16;
+        public Vector2[] touchModePositions=new Vector2[TouchModeCount*TouchModeStride];
+        public int[] touchModeSizePercent=new int[TouchModeCount*TouchModeStride],touchModeOpacityPercent=new int[TouchModeCount*TouchModeStride];
+        public int touchModeLayouts=1; // Loaded as 0 from older saves: their race layout is copied to DRAG and D-PAD.
+        // Overlay steering response per touchSteering mode; a connected controller uses its profile's.
+        public float[] touchDeadzone={0,0,0},touchSmoothing={0,0,.3f};
+        public static bool IsRaceTouchSlot(int slot)=>slot>=0&&slot<=5||slot>=11&&slot<TouchControlCount;
+        static int TouchIndex(int slot,int mode)=>IsRaceTouchSlot(slot)&&mode>=0&&mode<TouchModeCount?mode*TouchModeStride+slot:-1;
+        static int Percent(int[] values,int i)=>values!=null&&i>=0&&i<values.Length&&values[i]!=0?values[i]:100;
+        public Vector2 TouchOffset(int slot,int mode){int i=TouchIndex(slot,mode);return i<0?TouchOffset(slot):touchModePositions!=null&&i<touchModePositions.Length?touchModePositions[i]:Vector2.zero;}
+        public int TouchSizePercent(int slot,int mode){int i=TouchIndex(slot,mode);return i<0?TouchSizePercent(slot):Percent(touchModeSizePercent,i);}
+        public int TouchOpacityPercent(int slot,int mode){int i=TouchIndex(slot,mode);return i<0?TouchOpacityPercent(slot):Percent(touchModeOpacityPercent,i);}
+        public void SetTouchOffset(int slot,int mode,Vector2 offset){int i=TouchIndex(slot,mode);if(i<0)touchPositions[slot]=offset;else touchModePositions[i]=offset;}
+        public void SetTouchPercent(int slot,int mode,bool opacity,int percent){
+            int i=TouchIndex(slot,mode);var values=i<0?(opacity?touchOpacityPercent:touchSizePercent):(opacity?touchModeOpacityPercent:touchModeSizePercent);
+            values[i<0?slot:i]=percent==100?0:percent;
+        }
+        public float TouchDeadzone(int mode)=>touchDeadzone!=null&&mode>=0&&mode<touchDeadzone.Length?touchDeadzone[mode]:0;
+        public float TouchSmoothing(int mode)=>touchSmoothing!=null&&mode>=0&&mode<touchSmoothing.Length?touchSmoothing[mode]:mode==2?.3f:0;
+        public void SetTouchDeadzone(int mode,float value){if(mode>=0&&mode<TouchModeCount)touchDeadzone[mode]=value;}
+        public void SetTouchSmoothing(int mode,float value){if(mode>=0&&mode<TouchModeCount)touchSmoothing[mode]=value;}
         public float SteeringDeadzone {
             get=>controllerResponse==1?steeringDeadzonePrevious:controllerResponse==2?steeringDeadzoneWheel:steeringDeadzoneGamepad;
             set{if(controllerResponse==1)steeringDeadzonePrevious=value;else if(controllerResponse==2)steeringDeadzoneWheel=value;else steeringDeadzoneGamepad=value;}
         }
-        public Values Clone(){var copy=(Values)MemberwiseClone();copy.hudPositions=hudPositions==null?new Vector2[HudLayoutGroupCount]:(Vector2[])hudPositions.Clone();copy.hudSizePercent=hudSizePercent==null?new int[HudLayoutGroupCount]:(int[])hudSizePercent.Clone();CopyTouchLayout(this,copy);return copy;}
+        public Values Clone(){var copy=(Values)MemberwiseClone();copy.hudPositions=hudPositions==null?new Vector2[HudLayoutGroupCount]:(Vector2[])hudPositions.Clone();copy.hudSizePercent=hudSizePercent==null?new int[HudLayoutGroupCount]:(int[])hudSizePercent.Clone();CopyTouchLayout(this,copy);
+            copy.touchDeadzone=touchDeadzone==null?new float[TouchModeCount]:(float[])touchDeadzone.Clone();copy.touchSmoothing=touchSmoothing==null?new[]{0,0,.3f}:(float[])touchSmoothing.Clone();return copy;}
     }
     public struct ResolutionChoice
     {
@@ -193,7 +218,7 @@ public sealed class Idas3GameOptions
                 // Initialize missing fields explicitly. The zero marker lets
                 // old JSON migrate without treating saved zero deadzones as
                 // missing once these settings have been written.
-                var loaded=new Values{version=0,steeringSettingsVersion=0,audioSettingsVersion=0,hudMeterLayout=-1,touchSteering=-1};
+                var loaded=new Values{version=0,steeringSettingsVersion=0,audioSettingsVersion=0,hudMeterLayout=-1,touchSteering=-1,touchModeLayouts=0};
                 JsonUtility.FromJsonOverwrite(File.ReadAllText(file),loaded);
                 if(loaded==null||loaded.version!=1)throw new InvalidDataException("Unsupported options format.");
                 current=Normalize(loaded);loadedSaved=true;
@@ -286,6 +311,11 @@ public sealed class Idas3GameOptions
         to.touchPositions=from.touchPositions==null?new Vector2[Values.TouchControlCount]:(Vector2[])from.touchPositions.Clone();
         to.touchSizePercent=from.touchSizePercent==null?new int[Values.TouchControlCount]:(int[])from.touchSizePercent.Clone();
         to.touchOpacityPercent=from.touchOpacityPercent==null?new int[Values.TouchControlCount]:(int[])from.touchOpacityPercent.Clone();
+        const int modeSlots=Values.TouchModeCount*Values.TouchModeStride;
+        to.touchModePositions=from.touchModePositions==null?new Vector2[modeSlots]:(Vector2[])from.touchModePositions.Clone();
+        to.touchModeSizePercent=from.touchModeSizePercent==null?new int[modeSlots]:(int[])from.touchModeSizePercent.Clone();
+        to.touchModeOpacityPercent=from.touchModeOpacityPercent==null?new int[modeSlots]:(int[])from.touchModeOpacityPercent.Clone();
+        to.touchModeLayouts=from.touchModeLayouts;
     }
     public bool ConfirmDisplay(){
         if(!DisplayConfirmationPending)return false;
@@ -372,13 +402,28 @@ public sealed class Idas3GameOptions
         value.steeringSmoothing=float.IsNaN(value.steeringSmoothing)||float.IsInfinity(value.steeringSmoothing)?0:Math.Max(0,Math.Min(1,value.steeringSmoothing));
         value.wheelFeedbackStrength=float.IsNaN(value.wheelFeedbackStrength)||float.IsInfinity(value.wheelFeedbackStrength)?.35f:Math.Max(0,Math.Min(1,value.wheelFeedbackStrength));
         if(value.wheelFeedbackDevice==null||value.wheelFeedbackDevice.Length>512||value.wheelFeedbackDevice.IndexOf('\0')>=0)value.wheelFeedbackDevice="";
-        // Wide phones are ~2.3 screen heights across; the overlay re-clamps to the safe area.
         var touch=new Vector2[Values.TouchControlCount];var touchSizes=new int[Values.TouchControlCount];var touchOpacity=new int[Values.TouchControlCount];
-        for(int i=0;i<touch.Length;++i){var point=value.TouchOffset(i);
-            touch[i]=new Vector2(float.IsNaN(point.x)||float.IsInfinity(point.x)?0:Mathf.Clamp(point.x,-3,3),float.IsNaN(point.y)||float.IsInfinity(point.y)?0:Mathf.Clamp(point.y,-1,1));
-            touchSizes[i]=value.TouchSizePercent(i)==100?0:Math.Max(50,Math.Min(200,value.TouchSizePercent(i)));
-            touchOpacity[i]=value.TouchOpacityPercent(i)==100?0:Math.Max(20,Math.Min(100,value.TouchOpacityPercent(i)));}
+        for(int i=0;i<touch.Length;++i){touch[i]=TouchPoint(value.TouchOffset(i));
+            touchSizes[i]=TouchPercent(value.TouchSizePercent(i),50,200);touchOpacity[i]=TouchPercent(value.TouchOpacityPercent(i),20,100);}
+        // Per-mode race layouts. An older save's race layout becomes DRAG's and D-PAD's;
+        // TILT starts from its own default (BRAKE on the left).
+        const int modeSlots=Values.TouchModeCount*Values.TouchModeStride;
+        var modeTouch=new Vector2[modeSlots];var modeSizes=new int[modeSlots];var modeOpacity=new int[modeSlots];
+        for(int mode=0;mode<Values.TouchModeCount;++mode)
+            for(int slot=0;slot<Values.TouchControlCount;++slot){
+                if(!Values.IsRaceTouchSlot(slot))continue;
+                int i=mode*Values.TouchModeStride+slot;bool legacy=value.touchModeLayouts<1;
+                if(legacy&&mode==1)continue;
+                modeTouch[i]=legacy?touch[slot]:TouchPoint(value.TouchOffset(slot,mode));
+                modeSizes[i]=legacy?touchSizes[slot]:TouchPercent(value.TouchSizePercent(slot,mode),50,200);
+                modeOpacity[i]=legacy?touchOpacity[slot]:TouchPercent(value.TouchOpacityPercent(slot,mode),20,100);
+            }
         value.touchPositions=touch;value.touchSizePercent=touchSizes;value.touchOpacityPercent=touchOpacity;
+        value.touchModePositions=modeTouch;value.touchModeSizePercent=modeSizes;value.touchModeOpacityPercent=modeOpacity;value.touchModeLayouts=1;
+        var touchDeadzone=new float[Values.TouchModeCount];var touchSmoothing=new float[Values.TouchModeCount];
+        for(int mode=0;mode<Values.TouchModeCount;++mode){touchDeadzone[mode]=Deadzone(value.TouchDeadzone(mode),0);
+            float smoothing=value.TouchSmoothing(mode);touchSmoothing[mode]=float.IsNaN(smoothing)||float.IsInfinity(smoothing)?(mode==2?.3f:0):Math.Max(0,Math.Min(1,smoothing));}
+        value.touchDeadzone=touchDeadzone;value.touchSmoothing=touchSmoothing;
         value.touchSteeringTravel=float.IsNaN(value.touchSteeringTravel)||float.IsInfinity(value.touchSteeringTravel)?15:Math.Max(6,Math.Min(30,value.touchSteeringTravel));
         value.touchTiltDegrees=Math.Max(10,Math.Min(60,value.touchTiltDegrees));
         if(value.touchSteering==-1)value.touchSteering=value.touchTilt?1:0;
@@ -386,6 +431,9 @@ public sealed class Idas3GameOptions
         value.touchTilt=value.touchSteering==1;
         return value;
     }
+    // Wide phones are ~2.3 screen heights across; the overlay re-clamps to the safe area.
+    private static Vector2 TouchPoint(Vector2 point)=>new Vector2(float.IsNaN(point.x)||float.IsInfinity(point.x)?0:Mathf.Clamp(point.x,-3,3),float.IsNaN(point.y)||float.IsInfinity(point.y)?0:Mathf.Clamp(point.y,-1,1));
+    private static int TouchPercent(int percent,int minimum,int maximum)=>percent==100?0:Math.Max(minimum,Math.Min(maximum,percent));
     private static float Deadzone(float value,float fallback)=>float.IsNaN(value)||float.IsInfinity(value)?fallback:Math.Max(0,Math.Min(.3f,value));
     public static bool DisplayChanged(Values a,Values b)=>a.displayMode!=b.displayMode||a.width!=b.width||a.height!=b.height;
     private static bool SameHudPositions(Values a,Values b){for(int i=0;i<Values.HudLayoutGroupCount;++i)if(a.HudOffset(i)!=b.HudOffset(i))return false;return true;}
@@ -393,6 +441,10 @@ public sealed class Idas3GameOptions
     private static bool SameTouch(Values a,Values b){
         if(a.touchSteering!=b.touchSteering||a.touchSlideShift!=b.touchSlideShift||a.touchSteeringTravel!=b.touchSteeringTravel||a.touchTiltDegrees!=b.touchTiltDegrees)return false;
         for(int i=0;i<Values.TouchControlCount;++i)if(a.TouchOffset(i)!=b.TouchOffset(i)||a.TouchSizePercent(i)!=b.TouchSizePercent(i)||a.TouchOpacityPercent(i)!=b.TouchOpacityPercent(i))return false;
+        for(int mode=0;mode<Values.TouchModeCount;++mode){
+            if(a.TouchDeadzone(mode)!=b.TouchDeadzone(mode)||a.TouchSmoothing(mode)!=b.TouchSmoothing(mode))return false;
+            for(int i=0;i<Values.TouchControlCount;++i)if(Values.IsRaceTouchSlot(i)&&(a.TouchOffset(i,mode)!=b.TouchOffset(i,mode)||a.TouchSizePercent(i,mode)!=b.TouchSizePercent(i,mode)||a.TouchOpacityPercent(i,mode)!=b.TouchOpacityPercent(i,mode)))return false;
+        }
         return true;
     }
     public static bool Equivalent(Values a,Values b)=>a!=null&&b!=null&&

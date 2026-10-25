@@ -21,7 +21,7 @@ public sealed class Idas3PauseMenu : MonoBehaviour
     private static readonly string[] DisplayModes={"WINDOWED","BORDERLESS","FULLSCREEN"};
     private static readonly string[] CameraModes={"BUMPER","CHASE","NATURAL"};
     private static readonly string[] ControllerResponses={"FLYCAST GAMEPAD","PREVIOUS RESPONSE","FLYCAST WHEEL"};
-    private static readonly string[] TouchSteeringModes={"DRAG","TILT PHONE","D-PAD"};
+    private static readonly string[] TouchSteeringModes={"DRAG","TILT PHONE","D-PAD"},TouchModeNames={"DRAG","TILT","D-PAD"};
     private static readonly int[] FrameCaps={0,30,60,90,120,144,165,240,360},AaValues={0,2,4,8};
     private Idas3GameOptions options;
     private Idas3ControlBindings bindings;
@@ -34,6 +34,9 @@ public sealed class Idas3PauseMenu : MonoBehaviour
     private int bindingChoiceSelection;
     internal bool BindingChoiceVisible=>bindingChoice;
     internal bool WheelEditing=>wheelEditing;
+    // Set by the host: no controller connected, so DEADZONE and SMOOTHING are the touch mode's.
+    internal bool TouchSteeringResponse {get;set;}
+    private bool TouchResponseRows=>Idas3Platform.IsAndroid&&TouchSteeringResponse;
     internal void SetWheelNavigation(bool enabled){if(wheelNavigation!=enabled)wheelEditing=false;wheelNavigation=enabled;}
     private Idas3ControlBindings.ActionId captureAction;
     private Idas3ControlBindings.Slot captureSlot;
@@ -357,6 +360,13 @@ public sealed class Idas3PauseMenu : MonoBehaviour
             if(row==3)v.hideLightsOffAdvantage=!v.hideLightsOffAdvantage;
         }else if(tab==4){
             if(row==0)v.controllerResponse=Wrap(v.controllerResponse+direction,ControllerResponses.Length);
+            if(TouchResponseRows&&(row==1||row==2)){
+                // D-pad presses are keys, which the native stick deadzone never sees.
+                int mode=Mathf.Clamp(v.touchSteering,0,2);
+                if(row==1){if(mode==2){notice="Not used with the d-pad.";return;}v.SetTouchDeadzone(mode,Mathf.Clamp(Mathf.Round(v.TouchDeadzone(mode)*100)+direction,0,30)/100f);}
+                else v.SetTouchSmoothing(mode,Mathf.Clamp(Mathf.Round(v.TouchSmoothing(mode)*100)+direction,0,100)/100f);
+                notice="";return;
+            }
             if(row==1)v.SteeringDeadzone=Mathf.Clamp(Mathf.Round(v.SteeringDeadzone*100)+direction,0,30)/100f;
             if(row==2)v.steeringSmoothing=Mathf.Clamp(Mathf.Round(v.steeringSmoothing*100)+direction,0,100)/100f;
             if(Idas3Platform.IsAndroid){
@@ -579,8 +589,15 @@ public sealed class Idas3PauseMenu : MonoBehaviour
         else if(tab==4){
             Text(new Rect(290,182,681,22),"STEERING RESPONSE",small);
             ChoiceRow(0,"RESPONSE PROFILE",ControllerResponses[v.controllerResponse]);
-            SliderRow(1,"DEADZONE",v.SteeringDeadzone,.3f,value=>v.SteeringDeadzone=value);
-            SliderRow(2,"SMOOTHING",v.steeringSmoothing,1,value=>v.steeringSmoothing=value);
+            if(TouchResponseRows){
+                int mode=Mathf.Clamp(v.touchSteering,0,2);string name=TouchModeNames[mode];
+                if(mode==2)ChoiceRow(1,Idas3MenuLocalization.Format("DEADZONE · {0}",name),"N/A WITH D-PAD");
+                else SliderRow(1,Idas3MenuLocalization.Format("DEADZONE · {0}",name),v.TouchDeadzone(mode),.3f,value=>v.SetTouchDeadzone(mode,value));
+                SliderRow(2,Idas3MenuLocalization.Format("SMOOTHING · {0}",name),v.TouchSmoothing(mode),1,value=>v.SetTouchSmoothing(mode,value));
+            }else{
+                SliderRow(1,"DEADZONE",v.SteeringDeadzone,.3f,value=>v.SteeringDeadzone=value);
+                SliderRow(2,"SMOOTHING",v.steeringSmoothing,1,value=>v.steeringSmoothing=value);
+            }
             if(Idas3Platform.IsAndroid){
                 // No DirectInput wheels on Android: the force feedback rows become touch control rows.
                 Text(new Rect(290,326,681,22),"TOUCH CONTROLS",small);
@@ -588,8 +605,8 @@ public sealed class Idas3PauseMenu : MonoBehaviour
                 ChoiceRow(4,"FULL LOCK",v.touchSteering==2?"N/A WITH D-PAD":v.touchSteering==1?Idas3MenuLocalization.Format("{0}° TILT",v.touchTiltDegrees):Idas3MenuLocalization.Format("{0}% OF SCREEN HEIGHT",Mathf.RoundToInt(v.touchSteeringTravel)));
                 if(Button(new Rect(282,RowY(5)+2,692,33),"EDIT TOUCH LAYOUT",selection==6)){selection=6;OpenTouchEditor();}
                 ChoiceRow(6,"SLIDE TO SHIFT",v.touchSlideShift?"ON":"OFF");
-                Text(new Rect(288,508,681,35),selection<=3?"Deadzone is saved separately for each response profile.":selection==4?"Drag steers with a finger on the left side, tilt by turning the phone like a wheel, d-pad with left/right buttons.":
-                    selection==5?"How far to drag, or turn the phone, for full steering lock.":selection==6?"Move, resize or fade each touch button. Race and menu layouts are separate.":
+                Text(new Rect(288,508,681,35),selection<=3?(TouchSteeringResponse?"Each touch steering mode keeps its own deadzone and smoothing; a controller uses its profile's.":"Deadzone is saved separately for each response profile."):selection==4?"Drag steers with a finger on the left side, tilt by turning the phone like a wheel, d-pad with left/right buttons.":
+                    selection==5?"How far to drag, or turn the phone, for full steering lock.":selection==6?"Move, resize or fade each touch button. Each touch steering mode has its own race layout.":
                     "A finger sliding onto a shift button shifts once, from anywhere except steering. GAS and BRAKE stay pressed.",wrapped);
             }else{
                 Text(new Rect(290,326,681,22),"WHEEL FORCE FEEDBACK",small);
